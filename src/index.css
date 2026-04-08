@@ -410,11 +410,17 @@ code {
   box-shadow: 0 8px 20px -4px rgba(168, 85, 247, 0.4);
 }
 
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
 .brand-title {
   margin: 0;
-  font-size: clamp(1.05rem, 1rem + 0.5vw, 1.3rem);
+  font-size: clamp(0.95rem, 0.9rem + 0.4vw, 1.15rem);
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   font-weight: 800;
   background: var(--accent-gradient);
   -webkit-background-clip: text;
@@ -422,11 +428,13 @@ code {
 }
 
 .brand-subtitle {
-  margin: 0.22rem 0 0;
-  font-size: clamp(0.66rem, 0.63rem + 0.1vw, 0.72rem);
-  letter-spacing: 0.08em;
+  margin: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
   color: var(--text-muted);
   font-weight: 700;
+  text-transform: uppercase;
+  opacity: 0.85;
 }
 
 .topbar-console {

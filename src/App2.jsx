@@ -2520,7 +2520,7 @@ export default function App() {
             <div className="brand-mark">
               <PackageSearch size={22} />
             </div>
-            <div>
+            <div className="brand-text">
               <p className="brand-title">Picker Assistant</p>
               <p className="brand-subtitle">{topbarModuleLabel}</p>
             </div>
