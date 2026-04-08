@@ -1936,12 +1936,12 @@ export default function App() {
   const drawerPanel = selectedShelf ? (
     <aside className={`drawer ${isCompactView ? 'drawer-mobile' : ''}`}>
       <div className={`drawer-header ${selectedShelf.cat === 'HBC' ? 'drawer-header-hbc' : ''}`}>
-        <div>
+        <div className="drawer-header-info">
           <p className="drawer-overline">
-            Line {selectedShelf.id} | Side {selectedShelf.side}
+            L{selectedShelf.id} | Side {selectedShelf.side}
           </p>
           <h2>
-            <Target size={18} />
+            <Target size={16} />
             <span>{selectedShelf.name}</span>
           </h2>
         </div>
