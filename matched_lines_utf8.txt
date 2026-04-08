@@ -1,0 +1,676 @@
+﻿
+  downloaded_bundle.js:12913:      cat: n >= 16 ? `Frozen` : `Food`,
+  downloaded_bundle.js:12914:    };
+  downloaded_bundle.js:12915:  }),
+  downloaded_bundle.js:12916:  Ee = {
+  downloaded_bundle.js:12917:    unchecked: {
+  downloaded_bundle.js:12918:      id: `unchecked`,
+  downloaded_bundle.js:12919:      label: `Chua KT`,
+  downloaded_bundle.js:12920:      shortLabel: `Chua KT`,
+  downloaded_bundle.js:12921:      tone: `neutral`,
+  downloaded_bundle.js:12922:    },
+> downloaded_bundle.js:12923:    in_stock: {
+> downloaded_bundle.js:12924:      id: `in_stock`,
+  downloaded_bundle.js:12925:      label: `Con hang`,
+  downloaded_bundle.js:12926:      shortLabel: `Con hang`,
+  downloaded_bundle.js:12927:      tone: `good`,
+  downloaded_bundle.js:12928:    },
+> downloaded_bundle.js:12929:    low_stock: {
+> downloaded_bundle.js:12930:      id: `low_stock`,
+  downloaded_bundle.js:12931:      label: `Sap het`,
+  downloaded_bundle.js:12932:      shortLabel: `Sap het`,
+  downloaded_bundle.js:12933:      tone: `warn`,
+  downloaded_bundle.js:12934:    },
+> downloaded_bundle.js:12935:    out_of_stock: {
+> downloaded_bundle.js:12936:      id: `out_of_stock`,
+  downloaded_bundle.js:12937:      label: `Het hang`,
+  downloaded_bundle.js:12938:      shortLabel: `Het hang`,
+  downloaded_bundle.js:12939:      tone: `danger`,
+  downloaded_bundle.js:12940:    },
+  downloaded_bundle.js:12941:  };
+  downloaded_bundle.js:12942:function De(e) {
+  downloaded_bundle.js:12943:  return Array.isArray(e)
+  downloaded_bundle.js:12944:    ? e
+  downloaded_bundle.js:12945:        .map((e) => {
+  downloaded_bundle.js:12946:          let t = String(
+  downloaded_bundle.js:12983:    .replace(/[^a-z0-9]+/g, ` `)
+  downloaded_bundle.js:12984:    .trim();
+  downloaded_bundle.js:12985:}
+  downloaded_bundle.js:12986:function k(e, t) {
+  downloaded_bundle.js:12987:  return { id: Date.now(), type: e, message: t };
+  downloaded_bundle.js:12988:}
+  downloaded_bundle.js:12989:function ke(e) {
+  downloaded_bundle.js:12990:  return Ee[e] || Ee.unchecked;
+  downloaded_bundle.js:12991:}
+  downloaded_bundle.js:12992:function Ae() {
+> downloaded_bundle.js:12993:  return [Ee.unchecked, Ee.in_stock, Ee.low_stock, Ee.out_of_stock];
+  downloaded_bundle.js:12994:}
+  downloaded_bundle.js:12995:function je(e) {
+  downloaded_bundle.js:12996:  return {
+> downloaded_bundle.js:12997:    stockStatus: ke(e?.stockStatus).id,
+> downloaded_bundle.js:12998:    stockCheckedAt: e?.stockCheckedAt || null,
+  downloaded_bundle.js:12999:  };
+  downloaded_bundle.js:13000:}
+  downloaded_bundle.js:13001:function Me(e, t) {
+  downloaded_bundle.js:13002:  if (!Array.isArray(e)) return [];
+  downloaded_bundle.js:13003:  let n = new Map(),
+  downloaded_bundle.js:13004:    r = new Map();
+  downloaded_bundle.js:13005:  return (
+  downloaded_bundle.js:13006:    (t || []).forEach((e) => {
+  downloaded_bundle.js:13007:      let t = je(e),
+  downloaded_bundle.js:13008:        i = String(e?.sku || ``).trim(),
+  downloaded_bundle.js:13009:        a = `${Number(e?.locId) || 0}|${Oe(e?.name || ``)}`;
+  downloaded_bundle.js:13010:      (i && n.set(i, t), a !== `0|` && r.set(a, t));
+  downloaded_bundle.js:13011:    }),
+  downloaded_bundle.js:13012:    e.map((e) => {
+  downloaded_bundle.js:13013:      let t = String(e?.sku || ``).trim(),
+  downloaded_bundle.js:13014:        i = `${Number(e?.locId) || 0}|${Oe(e?.name || ``)}`,
+  downloaded_bundle.js:13015:        a = (t && n.get(t)) || r.get(i);
+  downloaded_bundle.js:13016:      return a
+  downloaded_bundle.js:13017:        ? { ...e, ...a }
+> downloaded_bundle.js:13018:        : { ...e, stockStatus: Ee.unchecked.id, stockCheckedAt: null };
+  downloaded_bundle.js:13019:    })
+  downloaded_bundle.js:13020:  );
+  downloaded_bundle.js:13021:}
+  downloaded_bundle.js:13022:function Ne(e) {
+  downloaded_bundle.js:13023:  if (!e) return ``;
+  downloaded_bundle.js:13024:  let t = new Date(e);
+  downloaded_bundle.js:13025:  return Number.isNaN(t.getTime())
+  downloaded_bundle.js:13026:    ? ``
+  downloaded_bundle.js:13027:    : new Intl.DateTimeFormat(`vi-VN`, {
+  downloaded_bundle.js:13028:        day: `2-digit`,
+  downloaded_bundle.js:13167:  return Math.max(0, Je(e) - Je(t));
+  downloaded_bundle.js:13168:}
+  downloaded_bundle.js:13169:function Xe() {
+  downloaded_bundle.js:13170:  try {
+  downloaded_bundle.js:13171:    if (typeof navigator < `u` && typeof navigator.vibrate == `function`)
+  downloaded_bundle.js:13172:      return navigator.vibrate([220, 80, 160]);
+  downloaded_bundle.js:13173:  } catch {}
+  downloaded_bundle.js:13174:  return !1;
+  downloaded_bundle.js:13175:}
+  downloaded_bundle.js:13176:function Ze(e) {
+> downloaded_bundle.js:13177:  let t = Je(e?.systemStock),
+> downloaded_bundle.js:13178:    n = Je(e?.actualStock),
+  downloaded_bundle.js:13179:    r = Je(e?.quantity);
+  downloaded_bundle.js:13180:  return {
+> downloaded_bundle.js:13181:    systemStock: t,
+> downloaded_bundle.js:13182:    actualStock: n,
+  downloaded_bundle.js:13183:    lossQuantity: Math.max(
+  downloaded_bundle.js:13184:      0,
+  downloaded_bundle.js:13185:      Number.isFinite(Number(e?.lossQuantity))
+  downloaded_bundle.js:13186:        ? Math.trunc(Number(e.lossQuantity))
+  downloaded_bundle.js:13187:        : Ye(t, n) || r,
+  downloaded_bundle.js:13188:    ),
+  downloaded_bundle.js:13189:  };
+  downloaded_bundle.js:13190:}
+  downloaded_bundle.js:13191:function Qe({ text: e, highlight: t }) {
+  downloaded_bundle.js:13192:  if (!e) return null;
+  downloaded_bundle.js:13539:        let t = j(b);
+  downloaded_bundle.js:13540:        t && e.set(t, b);
+  downloaded_bundle.js:13541:      }
+  downloaded_bundle.js:13542:      return Array.from(e.values());
+  downloaded_bundle.js:13543:    }, [b, an]),
+  downloaded_bundle.js:13544:    cn = (0, C.useMemo)(() => {
+  downloaded_bundle.js:13545:      let e = {
+  downloaded_bundle.js:13546:        total: F?.data.products.length || 0,
+  downloaded_bundle.js:13547:        checked: 0,
+  downloaded_bundle.js:13548:        unchecked: 0,
+> downloaded_bundle.js:13549:        in_stock: 0,
+> downloaded_bundle.js:13550:        low_stock: 0,
+> downloaded_bundle.js:13551:        out_of_stock: 0,
+  downloaded_bundle.js:13552:      };
+  downloaded_bundle.js:13553:      return (
+  downloaded_bundle.js:13554:        (F?.data.products || []).forEach((t) => {
+> downloaded_bundle.js:13555:          let n = ke(t?.stockStatus).id;
+  downloaded_bundle.js:13556:          e[n] += 1;
+  downloaded_bundle.js:13557:        }),
+> downloaded_bundle.js:13558:        (e.checked = e.in_stock + e.low_stock + e.out_of_stock),
+  downloaded_bundle.js:13559:        e
+  downloaded_bundle.js:13560:      );
+  downloaded_bundle.js:13561:    }, [F]),
+  downloaded_bundle.js:13562:    ln = (0, C.useMemo)(
+  downloaded_bundle.js:13563:      () =>
+  downloaded_bundle.js:13564:        Object.values(e).filter((e) => Array.isArray(e) && e.length > 0).length,
+  downloaded_bundle.js:13565:      [e],
+  downloaded_bundle.js:13566:    ),
+  downloaded_bundle.js:13567:    un = (0, C.useMemo)(
+  downloaded_bundle.js:13568:      () =>
+  downloaded_bundle.js:13584:                lineKey: e,
+  downloaded_bundle.js:13585:                locId: n?.locId,
+  downloaded_bundle.js:13586:                name: String(n?.name || ``),
+  downloaded_bundle.js:13587:                sku: String(n?.sku || i || a || ``),
+  downloaded_bundle.js:13588:                barcode: String(
+  downloaded_bundle.js:13589:                  n?.barcode || n?.productId || n?.ean || n?.sku || ``,
+  downloaded_bundle.js:13590:                ),
+  downloaded_bundle.js:13591:                productId: String(
+  downloaded_bundle.js:13592:                  n?.productId || n?.barcode || n?.ean || n?.sku || ``,
+  downloaded_bundle.js:13593:                ),
+> downloaded_bundle.js:13594:                stockStatus: ke(n?.stockStatus).id,
+  downloaded_bundle.js:13595:              };
+  downloaded_bundle.js:13596:            [r, i, a].forEach((e) => {
+  downloaded_bundle.js:13597:              e && !t.has(e) && t.set(e, o);
+  downloaded_bundle.js:13598:            });
+  downloaded_bundle.js:13599:          });
+  downloaded_bundle.js:13600:        }),
+  downloaded_bundle.js:13601:        t
+  downloaded_bundle.js:13602:      );
+  downloaded_bundle.js:13603:    }, [e]),
+  downloaded_bundle.js:13604:    fn = (0, C.useMemo)(
+  downloaded_bundle.js:13605:      () =>
+  downloaded_bundle.js:13606:        Yt
+  downloaded_bundle.js:13607:          ? Ce.filter((e) => {
+  downloaded_bundle.js:13608:              let t = Ze(e);
+  downloaded_bundle.js:13609:              return Oe(
+> downloaded_bundle.js:13610:                `${e?.barcode || ``} ${e?.productId || ``} ${e?.sku || ``} ${e?.name || 
+``} ${e?.lineKey || ``} ${e?.locId || ``} ${t.systemStock} ${t.actualStock} ${t.lossQuantity}`,
+  downloaded_bundle.js:13611:              ).includes(Yt);
+  downloaded_bundle.js:13612:            })
+  downloaded_bundle.js:13613:          : Ce,
+  downloaded_bundle.js:13614:      [Ce, Yt],
+  downloaded_bundle.js:13615:    ),
+  downloaded_bundle.js:13616:    pn = (0, C.useMemo)(
+  downloaded_bundle.js:13617:      () =>
+  downloaded_bundle.js:13618:        Yt
+  downloaded_bundle.js:13619:          ? i.filter((e) =>
+  downloaded_bundle.js:13620:              Oe(
+> downloaded_bundle.js:13621:                `${e?.periodName || ``} ${e?.createdByName || ``} ${e?.itemCount || ``} 
+${e?.totalLossQuantity || e?.totalQuantity || ``} ${e?.totalSystemStock || ``} ${e?.totalActualStock || ``}`,
+  downloaded_bundle.js:13622:              ).includes(Yt)
+  downloaded_bundle.js:13623:                ? !0
+  downloaded_bundle.js:13624:                : (e?.items || []).some((e) => {
+  downloaded_bundle.js:13625:                    let t = Ze(e);
+  downloaded_bundle.js:13626:                    return Oe(
+> downloaded_bundle.js:13627:                      `${e?.barcode || ``} ${e?.productId || ``} ${e?.sku || ``} 
+${e?.name || ``} ${e?.lineKey || ``} ${e?.locId || ``} ${t.systemStock} ${t.actualStock} ${t.lossQuantity}`,
+  downloaded_bundle.js:13628:                    ).includes(Yt);
+  downloaded_bundle.js:13629:                  }),
+  downloaded_bundle.js:13630:            )
+  downloaded_bundle.js:13631:          : i,
+  downloaded_bundle.js:13632:      [i, Yt],
+  downloaded_bundle.js:13633:    ),
+  downloaded_bundle.js:13634:    mn = (0, C.useMemo)(
+  downloaded_bundle.js:13635:      () => ({
+  downloaded_bundle.js:13636:        totalItems: Ce.length,
+  downloaded_bundle.js:13637:        totalLoss: Ce.reduce((e, t) => e + Ze(t).lossQuantity, 0),
+> downloaded_bundle.js:13638:        totalSystemStock: Ce.reduce((e, t) => e + Ze(t).systemStock, 0),
+> downloaded_bundle.js:13639:        totalActualStock: Ce.reduce((e, t) => e + Ze(t).actualStock, 0),
+  downloaded_bundle.js:13640:      }),
+  downloaded_bundle.js:13641:      [Ce],
+  downloaded_bundle.js:13642:    );
+  downloaded_bundle.js:13643:  ((0, C.useEffect)(() => {
+  downloaded_bundle.js:13644:    if (!ot) return;
+  downloaded_bundle.js:13645:    let e = window.setTimeout(() => M(null), 5e3);
+  downloaded_bundle.js:13646:    return () => window.clearTimeout(e);
+  downloaded_bundle.js:13647:  }, [ot]),
+  downloaded_bundle.js:13648:    (0, C.useEffect)(() => {
+  downloaded_bundle.js:13649:      function e() {
+  downloaded_bundle.js:14008:    if (s < 0) return;
+  downloaded_bundle.js:14009:    let c = ke(a).id,
+  downloaded_bundle.js:14010:      l = `${g}-${r.locId}-${r.sku || `na`}-${s}`,
+  downloaded_bundle.js:14011:      u = e,
+  downloaded_bundle.js:14012:      d = {
+  downloaded_bundle.js:14013:        ...u,
+  downloaded_bundle.js:14014:        [g]: o.map((e, t) =>
+  downloaded_bundle.js:14015:          t === s
+  downloaded_bundle.js:14016:            ? {
+  downloaded_bundle.js:14017:                ...e,
+> downloaded_bundle.js:14018:                stockStatus: c,
+> downloaded_bundle.js:14019:                stockCheckedAt:
+  downloaded_bundle.js:14020:                  c === `unchecked` ? null : new Date().toISOString(),
+  downloaded_bundle.js:14021:              }
+  downloaded_bundle.js:14022:            : e,
+  downloaded_bundle.js:14023:        ),
+  downloaded_bundle.js:14024:      };
+  downloaded_bundle.js:14025:    (t(d), yt(l));
+  downloaded_bundle.js:14026:    try {
+  downloaded_bundle.js:14027:      await bn(d, n, i);
+  downloaded_bundle.js:14028:    } catch (e) {
+  downloaded_bundle.js:14029:      (t(u), M(k(`error`, e.message || `Không lưu được thông tin tồn kho.`)));
+  downloaded_bundle.js:14193:          ? e.map((e, n) =>
+  downloaded_bundle.js:14194:              n === t
+  downloaded_bundle.js:14195:                ? {
+  downloaded_bundle.js:14196:                    ...e,
+  downloaded_bundle.js:14197:                    barcode: r.barcode || r.productId || r.sku,
+  downloaded_bundle.js:14198:                    productId: r.productId || r.barcode || r.sku,
+  downloaded_bundle.js:14199:                    sku: r.sku || r.barcode || r.productId,
+  downloaded_bundle.js:14200:                    name: r.name || e.name || ``,
+  downloaded_bundle.js:14201:                    lineKey: r.lineKey || e.lineKey,
+  downloaded_bundle.js:14202:                    locId: r.locId || e.locId,
+> downloaded_bundle.js:14203:                    stockStatus: r.stockStatus || e.stockStatus || `unchecked`,
+  downloaded_bundle.js:14204:                    lastScannedAt: i,
+> downloaded_bundle.js:14205:                    lossQuantity: Ye(e.systemStock, e.actualStock),
+  downloaded_bundle.js:14206:                  }
+  downloaded_bundle.js:14207:                : e,
+  downloaded_bundle.js:14208:            )
+  downloaded_bundle.js:14209:          : [
+  downloaded_bundle.js:14210:              {
+  downloaded_bundle.js:14211:                id: `loss-item-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  downloaded_bundle.js:14212:                barcode: r.barcode || r.productId || r.sku,
+  downloaded_bundle.js:14213:                productId: r.productId || r.barcode || r.sku,
+  downloaded_bundle.js:14214:                sku: r.sku || r.barcode || r.productId,
+  downloaded_bundle.js:14215:                name: r.name || ``,
+  downloaded_bundle.js:14216:                lineKey: r.lineKey,
+  downloaded_bundle.js:14217:                locId: r.locId,
+> downloaded_bundle.js:14218:                systemStock: ``,
+> downloaded_bundle.js:14219:                actualStock: ``,
+  downloaded_bundle.js:14220:                lossQuantity: 0,
+> downloaded_bundle.js:14221:                stockStatus: r.stockStatus || `unchecked`,
+  downloaded_bundle.js:14222:                scannedAt: i,
+  downloaded_bundle.js:14223:                lastScannedAt: i,
+  downloaded_bundle.js:14224:              },
+  downloaded_bundle.js:14225:              ...e,
+  downloaded_bundle.js:14226:            ];
+  downloaded_bundle.js:14227:      }),
+  downloaded_bundle.js:14228:      M(
+  downloaded_bundle.js:14229:        k(
+  downloaded_bundle.js:14230:          `success`,
+  downloaded_bundle.js:14231:          `Da ${t} ${r.name || r.sku || r.barcode || `san pham`} thanh cong.`,
+  downloaded_bundle.js:14242:  }
+  downloaded_bundle.js:14243:  function Ln(e, t, n) {
+  downloaded_bundle.js:14244:    let r = qe(n);
+  downloaded_bundle.js:14245:    Ee((n) =>
+  downloaded_bundle.js:14246:      n.map((n) =>
+  downloaded_bundle.js:14247:        n.id === e
+  downloaded_bundle.js:14248:          ? {
+  downloaded_bundle.js:14249:              ...n,
+  downloaded_bundle.js:14250:              [t]: r,
+  downloaded_bundle.js:14251:              lossQuantity: Ye(
+> downloaded_bundle.js:14252:                t === `systemStock` ? r : n?.systemStock,
+> downloaded_bundle.js:14253:                t === `actualStock` ? r : n?.actualStock,
+  downloaded_bundle.js:14254:              ),
+  downloaded_bundle.js:14255:            }
+  downloaded_bundle.js:14256:          : n,
+  downloaded_bundle.js:14257:      ),
+  downloaded_bundle.js:14258:    );
+  downloaded_bundle.js:14259:  }
+  downloaded_bundle.js:14260:  function Rn(e) {
+  downloaded_bundle.js:14261:    Ee((t) => t.filter((t) => t.id !== e));
+  downloaded_bundle.js:14262:  }
+  downloaded_bundle.js:14263:  function zn() {
+  downloaded_bundle.js:14270:      return;
+  downloaded_bundle.js:14271:    }
+  downloaded_bundle.js:14272:    let n = e?.periodName || T || Ge(),
+  downloaded_bundle.js:14273:      r = Ke(n) || `loss`,
+  downloaded_bundle.js:14274:      i = e?.createdAt || new Date().toISOString(),
+  downloaded_bundle.js:14275:      a = `loss-${r}-${i.slice(0, 10)}.xlsx`,
+  downloaded_bundle.js:14276:      o = t.reduce(
+  downloaded_bundle.js:14277:        (e, t) => {
+  downloaded_bundle.js:14278:          let n = Ze(t);
+  downloaded_bundle.js:14279:          return {
+> downloaded_bundle.js:14280:            totalSystemStock: e.totalSystemStock + n.systemStock,
+> downloaded_bundle.js:14281:            totalActualStock: e.totalActualStock + n.actualStock,
+  downloaded_bundle.js:14282:            totalLoss: e.totalLoss + n.lossQuantity,
+  downloaded_bundle.js:14283:          };
+  downloaded_bundle.js:14284:        },
+> downloaded_bundle.js:14285:        { totalSystemStock: 0, totalActualStock: 0, totalLoss: 0 },
+  downloaded_bundle.js:14286:      ),
+  downloaded_bundle.js:14287:      s = [
+  downloaded_bundle.js:14288:        { field: `Ky kiem`, value: n },
+  downloaded_bundle.js:14289:        {
+  downloaded_bundle.js:14290:          field: `Nguoi tao`,
+  downloaded_bundle.js:14291:          value: e?.createdByName || lt?.displayName || lt?.username || `Guest`,
+  downloaded_bundle.js:14292:        },
+  downloaded_bundle.js:14293:        { field: `Thoi gian`, value: i },
+  downloaded_bundle.js:14294:        { field: `Tong SKU`, value: t.length },
+> downloaded_bundle.js:14295:        { field: `Tong stock he thong`, value: o.totalSystemStock },
+> downloaded_bundle.js:14296:        { field: `Tong stock thuc te`, value: o.totalActualStock },
+  downloaded_bundle.js:14297:        { field: `Tổng loss`, value: o.totalLoss },
+  downloaded_bundle.js:14298:      ],
+  downloaded_bundle.js:14299:      c = t.map((e, t) => {
+> downloaded_bundle.js:14300:        let n = ke(e?.stockStatus),
+  downloaded_bundle.js:14301:          r = Ze(e);
+  downloaded_bundle.js:14302:        return {
+  downloaded_bundle.js:14303:          stt: t + 1,
+  downloaded_bundle.js:14304:          barcode: e?.barcode || ``,
+  downloaded_bundle.js:14305:          productId: e?.productId || ``,
+  downloaded_bundle.js:14306:          sku: e?.sku || ``,
+  downloaded_bundle.js:14307:          productName: e?.name || ``,
+  downloaded_bundle.js:14308:          line: e?.lineKey || ``,
+  downloaded_bundle.js:14309:          locId: e?.locId || ``,
+> downloaded_bundle.js:14310:          systemStock: r.systemStock,
+> downloaded_bundle.js:14311:          actualStock: r.actualStock,
+  downloaded_bundle.js:14312:          quantityLoss: r.lossQuantity,
+> downloaded_bundle.js:14313:          linkedStockStatus: n.label,
+  downloaded_bundle.js:14314:        };
+  downloaded_bundle.js:14315:      });
+  downloaded_bundle.js:14316:    Fe(!0);
+  downloaded_bundle.js:14317:    try {
+  downloaded_bundle.js:14318:      let e = await Re(() => import(`./xlsx-BrBceiPC.js`), []),
+  downloaded_bundle.js:14319:        t = e.utils.book_new(),
+  downloaded_bundle.js:14320:        n = e.utils.json_to_sheet(s),
+  downloaded_bundle.js:14321:        r = e.utils.json_to_sheet(c);
+  downloaded_bundle.js:14322:      (e.utils.book_append_sheet(t, n, He),
+  downloaded_bundle.js:14323:        e.utils.book_append_sheet(t, r, Ve),
+  downloaded_bundle.js:14344:      a = Ce.map((e) => {
+  downloaded_bundle.js:14345:        let t = dn.get(We(e?.barcode || e?.productId || e?.sku)),
+  downloaded_bundle.js:14346:          n = Ze(e);
+  downloaded_bundle.js:14347:        return {
+  downloaded_bundle.js:14348:          barcode: e?.barcode || ``,
+  downloaded_bundle.js:14349:          productId: e?.productId || ``,
+  downloaded_bundle.js:14350:          sku: e?.sku || ``,
+  downloaded_bundle.js:14351:          name: e?.name || ``,
+  downloaded_bundle.js:14352:          lineKey: e?.lineKey || ``,
+  downloaded_bundle.js:14353:          locId: e?.locId || ``,
+> downloaded_bundle.js:14354:          systemStock: n.systemStock,
+> downloaded_bundle.js:14355:          actualStock: n.actualStock,
+  downloaded_bundle.js:14356:          lossQuantity: n.lossQuantity,
+> downloaded_bundle.js:14357:          stockStatus: ke(t?.stockStatus || e?.stockStatus).id,
+  downloaded_bundle.js:14358:          scannedAt: e?.scannedAt || r,
+  downloaded_bundle.js:14359:          lastScannedAt: e?.lastScannedAt || r,
+  downloaded_bundle.js:14360:        };
+  downloaded_bundle.js:14361:      }),
+  downloaded_bundle.js:14362:      o = {
+  downloaded_bundle.js:14363:        id: `loss-audit-${Date.now()}`,
+  downloaded_bundle.js:14364:        periodName: t,
+  downloaded_bundle.js:14365:        createdAt: r,
+  downloaded_bundle.js:14366:        createdByName: lt?.displayName || lt?.username || `Unknown`,
+  downloaded_bundle.js:14367:        createdByUsername: lt?.username || ``,
+  downloaded_bundle.js:14368:        itemCount: a.length,
+> downloaded_bundle.js:14369:        totalSystemStock: a.reduce((e, t) => e + Je(t?.systemStock), 0),
+> downloaded_bundle.js:14370:        totalActualStock: a.reduce((e, t) => e + Je(t?.actualStock), 0),
+  downloaded_bundle.js:14371:        totalLossQuantity: a.reduce((e, t) => e + Je(t?.lossQuantity), 0),
+  downloaded_bundle.js:14372:        items: a,
+  downloaded_bundle.js:14373:      },
+  downloaded_bundle.js:14374:      s = [o, ...i].slice(0, 200);
+  downloaded_bundle.js:14375:    je(!0);
+  downloaded_bundle.js:14376:    try {
+  downloaded_bundle.js:14377:      (await bn(e, n, s),
+  downloaded_bundle.js:14378:        D(Ge()),
+  downloaded_bundle.js:14379:        te(``),
+  downloaded_bundle.js:14380:        Ee([]),
+  downloaded_bundle.js:14435:            { label: `Line co du lieu`, value: ln },
+  downloaded_bundle.js:14436:            { label: `Tong SKU`, value: un },
+  downloaded_bundle.js:14437:            { label: `Dang mo`, value: F ? `${F.id}-${F.side}` : `Chua chon` },
+  downloaded_bundle.js:14438:            ...(Jt
+  downloaded_bundle.js:14439:              ? [{ label: `Ket qua tim`, value: rn.length, highlight: !0 }]
+  downloaded_bundle.js:14440:              : []),
+  downloaded_bundle.js:14441:          ]
+  downloaded_bundle.js:14442:        : [
+  downloaded_bundle.js:14443:            { label: `Ky da luu`, value: i.length },
+  downloaded_bundle.js:14444:            { label: `SKU dang quet`, value: mn.totalItems },
+> downloaded_bundle.js:14445:            { label: `Stock he thong`, value: mn.totalSystemStock },
+  downloaded_bundle.js:14446:            { label: `Tổng loss`, value: mn.totalLoss, highlight: !0 },
+  downloaded_bundle.js:14447:          ],
+  downloaded_bundle.js:14448:    Kn = F
+  downloaded_bundle.js:14449:      ? (0, A.jsxs)(`aside`, {
+  downloaded_bundle.js:14450:          className: `drawer ${c ? `drawer-mobile` : ``}`,
+  downloaded_bundle.js:14451:          children: [
+  downloaded_bundle.js:14452:            (0, A.jsxs)(`div`, {
+  downloaded_bundle.js:14453:              className: `drawer-header ${F.cat === `HBC` ? `drawer-header-hbc` : ``}`,
+  downloaded_bundle.js:14454:              children: [
+  downloaded_bundle.js:14455:                (0, A.jsxs)(`div`, {
+  downloaded_bundle.js:14507:                            }),
+  downloaded_bundle.js:14508:                          ],
+  downloaded_bundle.js:14509:                        })
+  downloaded_bundle.js:14510:                      : null,
+  downloaded_bundle.js:14511:                    (0, A.jsx)($e, {
+  downloaded_bundle.js:14512:                      visual: F.data.visual,
+  downloaded_bundle.js:14513:                      highlightedLọcIds: sn,
+  downloaded_bundle.js:14514:                      enableMagnifier: !c,
+  downloaded_bundle.js:14515:                    }),
+  downloaded_bundle.js:14516:                    (0, A.jsxs)(`section`, {
+> downloaded_bundle.js:14517:                      className: `stock-panel`,
+  downloaded_bundle.js:14518:                      children: [
+  downloaded_bundle.js:14519:                        (0, A.jsxs)(`div`, {
+> downloaded_bundle.js:14520:                          className: `stock-panel-head`,
+  downloaded_bundle.js:14521:                          children: [
+  downloaded_bundle.js:14522:                            (0, A.jsxs)(`div`, {
+  downloaded_bundle.js:14523:                              children: [
+  downloaded_bundle.js:14524:                                (0, A.jsx)(`strong`, {
+  downloaded_bundle.js:14525:                                  children: `Kiểm tra tồn kho`,
+  downloaded_bundle.js:14526:                                }),
+  downloaded_bundle.js:14527:                                (0, A.jsxs)(`p`, {
+  downloaded_bundle.js:14528:                                  children: [
+  downloaded_bundle.js:14529:                                    cn.checked,
+  downloaded_bundle.js:14530:                                    `/`,
+  downloaded_bundle.js:14531:                                    cn.total,
+> downloaded_bundle.js:14532:                                    ` san pham da cap nhat stock`,
+  downloaded_bundle.js:14533:                                  ],
+  downloaded_bundle.js:14534:                                }),
+  downloaded_bundle.js:14535:                              ],
+  downloaded_bundle.js:14536:                            }),
+  downloaded_bundle.js:14537:                            vt
+  downloaded_bundle.js:14538:                              ? (0, A.jsx)(`span`, {
+> downloaded_bundle.js:14539:                                  className: `stock-saving-chip`,
+  downloaded_bundle.js:14540:                                  children: `Dang luu`,
+  downloaded_bundle.js:14541:                                })
+  downloaded_bundle.js:14542:                              : null,
+  downloaded_bundle.js:14543:                          ],
+  downloaded_bundle.js:14544:                        }),
+  downloaded_bundle.js:14545:                        (0, A.jsx)(`div`, {
+> downloaded_bundle.js:14546:                          className: `stock-summary-inline`,
+  downloaded_bundle.js:14547:                          children: ze.map((e) =>
+  downloaded_bundle.js:14548:                            (0, A.jsxs)(
+  downloaded_bundle.js:14549:                              `span`,
+  downloaded_bundle.js:14550:                              {
+> downloaded_bundle.js:14551:                                className: `stock-summary-pill 
+stock-summary-pill-${e.tone}`,
+  downloaded_bundle.js:14552:                                children: [
+  downloaded_bundle.js:14553:                                  (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14554:                                    children: e.shortLabel,
+  downloaded_bundle.js:14555:                                  }),
+  downloaded_bundle.js:14556:                                  (0, A.jsx)(`strong`, { children: cn[e.id] }),
+  downloaded_bundle.js:14557:                                ],
+  downloaded_bundle.js:14558:                              },
+  downloaded_bundle.js:14559:                              e.id,
+  downloaded_bundle.js:14560:                            ),
+  downloaded_bundle.js:14561:                          ),
+  downloaded_bundle.js:14566:                }),
+  downloaded_bundle.js:14567:                (0, A.jsx)(`div`, {
+  downloaded_bundle.js:14568:                  className: `drawer-products-scroll`,
+  downloaded_bundle.js:14569:                  children:
+  downloaded_bundle.js:14570:                    on.length > 0
+  downloaded_bundle.js:14571:                      ? (0, A.jsx)(`div`, {
+  downloaded_bundle.js:14572:                          className: `product-list`,
+  downloaded_bundle.js:14573:                          children: on.map((e, t) => {
+  downloaded_bundle.js:14574:                            let n = Jt && Ue(e).includes(Jt),
+  downloaded_bundle.js:14575:                              r = j(b) === j(e.locId),
+> downloaded_bundle.js:14576:                              i = ke(e.stockStatus),
+  downloaded_bundle.js:14577:                              a = F.data.products.findIndex((t) => t === e),
+  downloaded_bundle.js:14578:                              o =
+  downloaded_bundle.js:14579:                                vt === `${g}-${e.locId}-${e.sku || `na`}-${a}`;
+  downloaded_bundle.js:14580:                            return (0, A.jsxs)(
+  downloaded_bundle.js:14581:                              `article`,
+  downloaded_bundle.js:14582:                              {
+  downloaded_bundle.js:14583:                                className: `product-card ${n ? `product-card-match` : ``} 
+${r ? `product-card-focused` : ``}`,
+  downloaded_bundle.js:14584:                                onMouseEnter: () => x(e.locId),
+  downloaded_bundle.js:14585:                                onMouseLeave: () => x(null),
+  downloaded_bundle.js:14586:                                onFocus: () => x(e.locId),
+  downloaded_bundle.js:14600:                                          }),
+  downloaded_bundle.js:14601:                                          e.sku
+  downloaded_bundle.js:14602:                                            ? (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14603:                                                className: `product-sku`,
+  downloaded_bundle.js:14604:                                                children: e.sku,
+  downloaded_bundle.js:14605:                                              })
+  downloaded_bundle.js:14606:                                            : null,
+  downloaded_bundle.js:14607:                                        ],
+  downloaded_bundle.js:14608:                                      }),
+  downloaded_bundle.js:14609:                                      (0, A.jsx)(`select`, {
+> downloaded_bundle.js:14610:                                        className: `stock-select stock-select-${i.tone}`,
+  downloaded_bundle.js:14611:                                        value: i.id,
+  downloaded_bundle.js:14612:                                        disabled: o,
+  downloaded_bundle.js:14613:                                        onClick: (e) => e.stopPropagation(),
+  downloaded_bundle.js:14614:                                        onFocus: (e) => e.stopPropagation(),
+  downloaded_bundle.js:14615:                                        onChange: (t) => {
+  downloaded_bundle.js:14616:                                          (t.stopPropagation(),
+  downloaded_bundle.js:14617:                                            En(e, t.target.value));
+  downloaded_bundle.js:14618:                                        },
+  downloaded_bundle.js:14619:                                        children: ze.map((e) =>
+  downloaded_bundle.js:14620:                                          (0, A.jsx)(
+  downloaded_bundle.js:14647:                                              (0, A.jsx)(ie, {
+  downloaded_bundle.js:14648:                                                size: 12,
+  downloaded_bundle.js:14649:                                                strokeWidth: 4,
+  downloaded_bundle.js:14650:                                              }),
+  downloaded_bundle.js:14651:                                              (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14652:                                                children: `Đã khớp`,
+  downloaded_bundle.js:14653:                                              }),
+  downloaded_bundle.js:14654:                                            ],
+  downloaded_bundle.js:14655:                                          })
+  downloaded_bundle.js:14656:                                        : (0, A.jsx)(`span`, {
+> downloaded_bundle.js:14657:                                            className: `stock-timestamp 
+stock-timestamp-empty`,
+  downloaded_bundle.js:14658:                                            children: `Chưa đối chiếu`,
+  downloaded_bundle.js:14659:                                          }),
+> downloaded_bundle.js:14660:                                      e.stockCheckedAt
+  downloaded_bundle.js:14661:                                        ? (0, A.jsxs)(`p`, {
+> downloaded_bundle.js:14662:                                            className: `stock-timestamp`,
+  downloaded_bundle.js:14663:                                            children: [
+  downloaded_bundle.js:14664:                                              `Cap nhat: `,
+> downloaded_bundle.js:14665:                                              Ne(e.stockCheckedAt),
+  downloaded_bundle.js:14666:                                            ],
+  downloaded_bundle.js:14667:                                          })
+  downloaded_bundle.js:14668:                                        : (0, A.jsx)(`p`, {
+> downloaded_bundle.js:14669:                                            className: `stock-timestamp 
+stock-timestamp-empty`,
+  downloaded_bundle.js:14670:                                            children: `Chưa kiểm tra tồn kho`,
+  downloaded_bundle.js:14671:                                          }),
+  downloaded_bundle.js:14672:                                    ],
+  downloaded_bundle.js:14673:                                  }),
+  downloaded_bundle.js:14674:                                ],
+  downloaded_bundle.js:14675:                              },
+  downloaded_bundle.js:14676:                              `${e.locId}-${e.sku}-${t}`,
+  downloaded_bundle.js:14677:                            );
+  downloaded_bundle.js:14678:                          }),
+  downloaded_bundle.js:14679:                        })
+  downloaded_bundle.js:14715:              className: `loss-toolbar-copy`,
+  downloaded_bundle.js:14716:              children: [
+  downloaded_bundle.js:14717:                (0, A.jsx)(`p`, {
+  downloaded_bundle.js:14718:                  className: `section-label`,
+  downloaded_bundle.js:14719:                  children: `Kiểm loss sản phẩm`,
+  downloaded_bundle.js:14720:                }),
+  downloaded_bundle.js:14721:                (0, A.jsxs)(`h2`, {
+  downloaded_bundle.js:14722:                  children: [
+  downloaded_bundle.js:14723:                    (0, A.jsx)(O, { size: 18 }),
+  downloaded_bundle.js:14724:                    (0, A.jsx)(`span`, {
+> downloaded_bundle.js:14725:                      children: `Quét barcode, đối chiếu stock và lưu kỳ kiểm`,
+  downloaded_bundle.js:14726:                    }),
+  downloaded_bundle.js:14727:                  ],
+  downloaded_bundle.js:14728:                }),
+  downloaded_bundle.js:14729:                (0, A.jsx)(`p`, {
+  downloaded_bundle.js:14730:                  children: `Giao diện ưu tiên quét nhanh, nhập nhanh và xem lịch sử ở 
+cùng một màn hình.`,
+  downloaded_bundle.js:14731:                }),
+  downloaded_bundle.js:14732:              ],
+  downloaded_bundle.js:14733:            }),
+  downloaded_bundle.js:14734:            (0, A.jsx)(`div`, {
+  downloaded_bundle.js:14735:              className: `summary-strip summary-strip-inline`,
+  downloaded_bundle.js:14762:                    children: [
+  downloaded_bundle.js:14763:                      (0, A.jsxs)(`h3`, {
+  downloaded_bundle.js:14764:                        children: [
+  downloaded_bundle.js:14765:                          (0, A.jsx)(ne, { size: 18 }),
+  downloaded_bundle.js:14766:                          (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14767:                            children: `Phiếu quét hiện tại`,
+  downloaded_bundle.js:14768:                          }),
+  downloaded_bundle.js:14769:                        ],
+  downloaded_bundle.js:14770:                      }),
+  downloaded_bundle.js:14771:                      (0, A.jsx)(`p`, {
+> downloaded_bundle.js:14772:                        children: `Nhập hoặc quét barcode để thêm sản phẩm, sau đó điền 
+stock hệ thống và stock thực tế.`,
+  downloaded_bundle.js:14773:                      }),
+  downloaded_bundle.js:14774:                    ],
+  downloaded_bundle.js:14775:                  }),
+  downloaded_bundle.js:14776:                }),
+  downloaded_bundle.js:14777:                (0, A.jsxs)(`form`, {
+  downloaded_bundle.js:14778:                  className: `loss-entry-form`,
+  downloaded_bundle.js:14779:                  onSubmit: In,
+  downloaded_bundle.js:14780:                  children: [
+  downloaded_bundle.js:14781:                    (0, A.jsxs)(`label`, {
+  downloaded_bundle.js:14782:                      className: `field`,
+  downloaded_bundle.js:14872:                      children: `Đang ở chế độ xem. Đăng nhập để lưu kỳ loss dùng chung.`,
+  downloaded_bundle.js:14873:                    })
+  downloaded_bundle.js:14874:                  : null,
+  downloaded_bundle.js:14875:                (0, A.jsx)(`div`, {
+  downloaded_bundle.js:14876:                  className: `loss-draft-list`,
+  downloaded_bundle.js:14877:                  children:
+  downloaded_bundle.js:14878:                    fn.length > 0
+  downloaded_bundle.js:14879:                      ? fn.map((e) => {
+  downloaded_bundle.js:14880:                          let t = ke(
+  downloaded_bundle.js:14881:                              dn.get(We(e?.barcode || e?.productId || e?.sku))
+> downloaded_bundle.js:14882:                                ?.stockStatus || e?.stockStatus,
+  downloaded_bundle.js:14883:                            ),
+  downloaded_bundle.js:14884:                            n = Ze(e);
+  downloaded_bundle.js:14885:                          return (0, A.jsxs)(
+  downloaded_bundle.js:14886:                            `article`,
+  downloaded_bundle.js:14887:                            {
+  downloaded_bundle.js:14888:                              className: `loss-item-row`,
+  downloaded_bundle.js:14889:                              children: [
+  downloaded_bundle.js:14890:                                (0, A.jsxs)(`div`, {
+  downloaded_bundle.js:14891:                                  className: `loss-item-main`,
+  downloaded_bundle.js:14892:                                  children: [
+  downloaded_bundle.js:14912:                                        ` | Product ID: `,
+  downloaded_bundle.js:14913:                                        e.productId || `--`,
+  downloaded_bundle.js:14914:                                      ],
+  downloaded_bundle.js:14915:                                    }),
+  downloaded_bundle.js:14916:                                  ],
+  downloaded_bundle.js:14917:                                }),
+  downloaded_bundle.js:14918:                                (0, A.jsxs)(`div`, {
+  downloaded_bundle.js:14919:                                  className: `loss-item-controls`,
+  downloaded_bundle.js:14920:                                  children: [
+  downloaded_bundle.js:14921:                                    (0, A.jsxs)(`span`, {
+> downloaded_bundle.js:14922:                                      className: `stock-summary-pill 
+stock-summary-pill-${t.tone}`,
+  downloaded_bundle.js:14923:                                      children: [
+  downloaded_bundle.js:14924:                                        (0, A.jsx)(`span`, {
+> downloaded_bundle.js:14925:                                          children: `Stock`,
+  downloaded_bundle.js:14926:                                        }),
+  downloaded_bundle.js:14927:                                        (0, A.jsx)(`strong`, {
+  downloaded_bundle.js:14928:                                          children: t.shortLabel,
+  downloaded_bundle.js:14929:                                        }),
+  downloaded_bundle.js:14930:                                      ],
+  downloaded_bundle.js:14931:                                    }),
+  downloaded_bundle.js:14932:                                    (0, A.jsxs)(`label`, {
+  downloaded_bundle.js:14933:                                      className: `loss-qty-field`,
+  downloaded_bundle.js:14934:                                      children: [
+  downloaded_bundle.js:14935:                                        (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14936:                                          children: `Hệ thống`,
+  downloaded_bundle.js:14937:                                        }),
+  downloaded_bundle.js:14938:                                        (0, A.jsx)(`input`, {
+  downloaded_bundle.js:14939:                                          type: `number`,
+  downloaded_bundle.js:14940:                                          min: `0`,
+  downloaded_bundle.js:14941:                                          step: `1`,
+> downloaded_bundle.js:14942:                                          value: e?.systemStock ?? ``,
+  downloaded_bundle.js:14943:                                          onChange: (t) =>
+  downloaded_bundle.js:14944:                                            Ln(
+  downloaded_bundle.js:14945:                                              e.id,
+> downloaded_bundle.js:14946:                                              `systemStock`,
+  downloaded_bundle.js:14947:                                              t.target.value,
+  downloaded_bundle.js:14948:                                            ),
+  downloaded_bundle.js:14949:                                        }),
+  downloaded_bundle.js:14950:                                      ],
+  downloaded_bundle.js:14951:                                    }),
+  downloaded_bundle.js:14952:                                    (0, A.jsxs)(`label`, {
+  downloaded_bundle.js:14953:                                      className: `loss-qty-field`,
+  downloaded_bundle.js:14954:                                      children: [
+  downloaded_bundle.js:14955:                                        (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14956:                                          children: `Thực tế`,
+  downloaded_bundle.js:14957:                                        }),
+  downloaded_bundle.js:14958:                                        (0, A.jsx)(`input`, {
+  downloaded_bundle.js:14959:                                          type: `number`,
+  downloaded_bundle.js:14960:                                          min: `0`,
+  downloaded_bundle.js:14961:                                          step: `1`,
+> downloaded_bundle.js:14962:                                          value: e?.actualStock ?? ``,
+  downloaded_bundle.js:14963:                                          onChange: (t) =>
+  downloaded_bundle.js:14964:                                            Ln(
+  downloaded_bundle.js:14965:                                              e.id,
+> downloaded_bundle.js:14966:                                              `actualStock`,
+  downloaded_bundle.js:14967:                                              t.target.value,
+  downloaded_bundle.js:14968:                                            ),
+  downloaded_bundle.js:14969:                                        }),
+  downloaded_bundle.js:14970:                                      ],
+  downloaded_bundle.js:14971:                                    }),
+  downloaded_bundle.js:14972:                                    (0, A.jsxs)(`div`, {
+  downloaded_bundle.js:14973:                                      className: `loss-delta-pill`,
+> downloaded_bundle.js:14974:                                      title: `Stock he thong tru stock thuc te`,
+  downloaded_bundle.js:14975:                                      children: [
+  downloaded_bundle.js:14976:                                        (0, A.jsx)(`span`, {
+  downloaded_bundle.js:14977:                                          children: `Loss`,
+  downloaded_bundle.js:14978:                                        }),
+  downloaded_bundle.js:14979:                                        (0, A.jsx)(`strong`, {
+  downloaded_bundle.js:14980:                                          children: n.lossQuantity,
+  downloaded_bundle.js:14981:                                        }),
+  downloaded_bundle.js:14982:                                      ],
+  downloaded_bundle.js:14983:                                    }),
+  downloaded_bundle.js:14984:                                    (0, A.jsx)(`button`, {
+
+

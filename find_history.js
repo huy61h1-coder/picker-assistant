@@ -1,0 +1,1 @@
+const fs = require('fs'); const path = require('path'); function walk(dir) { fs.readdirSync(dir).forEach(f = const p = path.join(dir, f); if (fs.statSync(p).isDirectory()) walk(p); else if (fs.readFileSync(p, 'utf8').includes('moduleSummaryItemsWithStock')) console.log(p); }); } walk('C:/Users/huy.dang/AppData/Roaming/Code/User/History');  

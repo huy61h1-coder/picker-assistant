@@ -1,0 +1,25 @@
+{
+  "name": "picker-assistant",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server-dev.mjs",
+    "dev:client": "vite",
+    "dev:api": "node server/api-server.mjs",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@zxing/browser": "^0.1.5",
+    "lucide-react": "latest",
+    "pdfjs-dist": "^5.6.205",
+    "react": "latest",
+    "react-dom": "latest",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest"
+  }
+}
