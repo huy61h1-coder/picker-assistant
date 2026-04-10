@@ -28,8 +28,9 @@ import {
   Moon,
   Sun,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { translations, FONT_OPTIONS } from './translations';
-import { MAIN_AISLES, SECONDARY_AISLES } from './data';
+import { MAIN_AISLES, SECONDARY_AISLES, STORAGE_KEY } from './data';
 import {
   buildToast,
   formatStockCheckedAt,
@@ -38,6 +39,7 @@ import {
   mergeProductStockState,
   normaliseExtractedItems,
   normaliseSearchText,
+  persistToStorage,
 } from './utils';
 
 const STOCK_OPTIONS = getStockControlOptions();
@@ -440,6 +442,7 @@ export default function App() {
   const [scannerError, setScannerError] = useState('');
   const [cameraPermissionState, setCameraPermissionState] = useState('unknown');
   const [toast, setToast] = useState(null);
+  const [showManagePogModal, setShowManagePogModal] = useState(false);
   const [authToken, setAuthToken] = useState(() => window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '');
   const [authUser, setAuthUser] = useState(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -1116,6 +1119,54 @@ export default function App() {
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp, { once: true });
   }
+
+  const downloadPogData = (lineKey) => {
+    const data = aisleProducts[lineKey] || [];
+    if (!data.length) {
+      setToast(buildToast('error', 'Không có dữ liệu POG để tải xuống.'));
+      return;
+    }
+
+    const exportData = data.map(item => ({
+      'Line/Side': lineKey,
+      'Loc ID': item.locId,
+      'SKU': item.sku,
+      'Barcode': item.barcode || item.sku,
+      'Product Name': item.name
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'POG Data');
+    
+    // Tạo width cho từng cột
+    const columnWidths = [
+      { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 60 }
+    ];
+    worksheet['!cols'] = columnWidths;
+
+    XLSX.writeFile(workbook, `POG_${lineKey}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    setToast(buildToast('success', `Đã tải xuống POG ${lineKey}.`));
+  };
+
+  const deletePogData = (lineKey) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa vĩnh viễn POG của ${lineKey} không? Dữ liệu không thể phục hồi.`)) {
+      return;
+    }
+    
+    setAisleProducts(current => {
+      const updated = { ...current };
+      delete updated[lineKey];
+      persistToStorage(STORAGE_KEY, updated);
+      return updated;
+    });
+    
+    if (selectedId === lineKey) {
+      setSelectedId(null);
+    }
+    
+    setToast(buildToast('success', `Đã xóa POG ${lineKey}.`));
+  };
 
   function openSyncModal() {
     if (isReadOnly) {
@@ -2578,15 +2629,25 @@ export default function App() {
 
               <div className="topbar-quick-actions">
                 {activeModule === 'pog' ? (
-                  <button
-                    type="button"
-                    className="primary-button topbar-sync-button"
-                    onClick={openSyncModal}
-                    title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
-                  >
-                    <Sparkles size={16} />
-                    <span>{t('btnUpdatePog')}</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => setShowManagePogModal(true)}
+                    >
+                      <Database size={16} />
+                      <span>{t('btnManagePog') || 'Dữ liệu POG'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button topbar-sync-button"
+                      onClick={openSyncModal}
+                      title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
+                    >
+                      <Sparkles size={16} />
+                      <span>{t('btnUpdatePog')}</span>
+                    </button>
+                  </>
                 ) : null}
 
                 {isReadOnly ? (
@@ -2689,6 +2750,16 @@ export default function App() {
 
       {isCompactView ? (
         <section className="mobile-action-dock" aria-label="Tác vụ nhanh">
+          <button
+            type="button"
+            className="mobile-action-button mobile-action-secondary"
+            onClick={() => setShowManagePogModal(true)}
+            title="Dữ liệu POG"
+          >
+            <Database size={16} />
+            <span>Dữ liệu POG</span>
+          </button>
+          
           <button
             type="button"
             className="mobile-action-button mobile-action-primary"
@@ -2851,6 +2922,54 @@ export default function App() {
                 <button type="button" className="secondary-button" onClick={closeBarcodeScanner}>
                   {t('btnClose')}
                 </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {showManagePogModal ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal">
+            <header className="modal-header">
+              <div className="modal-title">
+                <Database size={24} />
+                <span>Quản lý dữ liệu POG</span>
+              </div>
+              <button type="button" className="icon-button icon-button-light" onClick={() => setShowManagePogModal(false)}>
+                <X size={24} />
+              </button>
+            </header>
+
+            <div className="modal-body">
+              <div className="extract-list">
+                {Object.entries(aisleProducts).filter(([_, items]) => items && items.length > 0).sort((a, b) => a[0].localeCompare(b[0])).length > 0 ? (
+                  Object.entries(aisleProducts)
+                    .filter(([_, items]) => items && items.length > 0)
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([lineKey, items]) => (
+                      <div key={lineKey} className="extract-card">
+                        <div className="extract-column-head">
+                          <strong>Line {lineKey}</strong>
+                          <span style={{marginLeft: '0.4rem'}}>{items.length} mặt hàng</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.6rem' }}>
+                          <button type="button" className="secondary-button" onClick={() => downloadPogData(lineKey)}>
+                            <Download size={15} />
+                            Tải Excel
+                          </button>
+                          <button type="button" className="secondary-button" style={{ color: '#dc2626' }} title="Xóa POG Line này" onClick={() => deletePogData(lineKey)}>
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                ) : (
+                  <div className="empty-state">
+                    <Database size={42} strokeWidth={1.4} />
+                    <p>Hệ thống chưa có dữ liệu POG nào được lưu.</p>
+                  </div>
+                )}
               </div>
             </div>
           </section>
