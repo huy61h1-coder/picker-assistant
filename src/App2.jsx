@@ -2567,9 +2567,22 @@ export default function App() {
 
       <header className="topbar">
         <div className="topbar-inner">
-          <div className="brand">
+          {/* Logo - click để reset về màn hình chính */}
+          <div
+            className="brand"
+            role="button"
+            tabIndex={0}
+            title="Về trang chủ"
+            onClick={() => {
+              setSelectedId('L12-A');
+              setActiveModule('pog');
+              setSearchTerm('');
+              setFocusedLọcId(null);
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && setActiveModule('pog')}
+          >
             <div className="brand-mark">
-              <PackageSearch size={22} />
+              <PackageSearch size={18} />
             </div>
             <div className="brand-text">
               <p className="brand-title">Picker Assistant</p>
@@ -2577,131 +2590,119 @@ export default function App() {
             </div>
           </div>
 
-          <div className="topbar-console">
-            <div className="topbar-console-row topbar-console-row-meta">
-              <div className="topbar-module-switch" role="tablist" aria-label="Chọn module">
+          <div className="topbar-divider" />
+
+          {/* Module Switcher */}
+          <div className="topbar-module-switch" role="tablist" aria-label="Chọn module">
+            <button
+              type="button"
+              className={activeModule === 'pog' ? 'is-active' : ''}
+              onClick={() => setActiveModule('pog')}
+            >POG</button>
+            <button
+              type="button"
+              className={activeModule === 'loss' ? 'is-active' : ''}
+              onClick={() => setActiveModule('loss')}
+            >Check Loss</button>
+            <button
+              type="button"
+              className={activeModule === 'stock' ? 'is-active' : ''}
+              onClick={() => setActiveModule('stock')}
+            >Check Stock</button>
+          </div>
+
+          {/* Searchbox */}
+          <label className="searchbox">
+            <Search size={14} />
+            <input
+              type="text"
+              value={topbarSearchValue}
+              onChange={(event) => handleTopbarSearchChange(event.target.value)}
+              placeholder={topbarSearchPlaceholder}
+            />
+          </label>
+
+          {/* Quick Actions */}
+          <div className="topbar-quick-actions">
+            {activeModule === 'pog' ? (
+              <>
                 <button
                   type="button"
-                  className={activeModule === 'pog' ? 'is-active' : ''}
-                  onClick={() => setActiveModule('pog')}
+                  className="secondary-button"
+                  onClick={() => setShowManagePogModal(true)}
                 >
-                  POG
+                  <Database size={14} />
+                  <span>Dữ liệu POG</span>
                 </button>
                 <button
                   type="button"
-                  className={activeModule === 'loss' ? 'is-active' : ''}
-                  onClick={() => setActiveModule('loss')}
+                  className="primary-button"
+                  disabled={isReadOnly}
+                  onClick={openSyncModal}
+                  title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
                 >
-                  Check Loss
+                  <Sparkles size={14} />
+                  <span>{t('btnUpdatePog')}</span>
                 </button>
-                <button
-                  type="button"
-                  className={activeModule === 'stock' ? 'is-active' : ''}
-                  onClick={() => setActiveModule('stock')}
-                >
-                  Check Stock
-                </button>
-              </div>
+              </>
+            ) : null}
 
-              <div className="topbar-summary-strip">
-                {moduleSummaryItems.map((item) => (
-                  <article
-                    key={`topbar-summary-${item.label}`}
-                    className={`summary-card ${item.highlight ? 'summary-card-highlight' : ''}`}
-                  >
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                  </article>
-                ))}
-              </div>
-            </div>
-
-            <div className="topbar-console-row topbar-console-row-actions">
-              <label className="searchbox">
-                <Search size={16} />
-                <input
-                  type="text"
-                  value={topbarSearchValue}
-                  onChange={(event) => handleTopbarSearchChange(event.target.value)}
-                  placeholder={topbarSearchPlaceholder}
-                />
-              </label>
-
-              <div className="topbar-quick-actions">
-                {activeModule === 'pog' ? (
-                  <>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => setShowManagePogModal(true)}
-                    >
-                      <Database size={16} />
-                      <span>{t('btnManagePog') || 'Dữ liệu POG'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="primary-button topbar-sync-button"
-                      onClick={openSyncModal}
-                      title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
-                    >
-                      <Sparkles size={16} />
-                      <span>{t('btnUpdatePog')}</span>
-                    </button>
-                  </>
+            {isReadOnly ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setShowLoginModal(true)}
+                title={t('btnLogin')}
+              >
+                <LogIn size={14} />
+                <span>{t('btnLogin')}</span>
+              </button>
+            ) : (
+              <>
+                {authUser ? (
+                  <div className="topbar-user-chip">
+                    <UserRound size={14} />
+                    <span>{authUser.username || authUser.name || 'User'}</span>
+                  </div>
                 ) : null}
-
-                {isReadOnly ? (
-                  <button
-                    type="button"
-                    className="secondary-button topbar-logout-button"
-                    onClick={() => setShowLoginModal(true)}
-                    title={t('btnLogin')}
-                  >
-                    <LogIn size={15} />
-                    <span>{t('btnLogin')}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="secondary-button topbar-logout-button"
-                    onClick={handleLogout}
-                    title={t('btnLogout')}
-                  >
-                    <LogOut size={15} />
-                    <span>{t('btnLogout')}</span>
-                  </button>
-                )}
-
                 <button
                   type="button"
-                  className="secondary-button topbar-theme-button"
-                  onClick={() => setIsDarkMode((prev) => !prev)}
-                  title="Chuyển chế độ tối/sáng"
-                  style={{ padding: '0 0.8rem' }}
+                  className="secondary-button"
+                  onClick={handleLogout}
+                  title={t('btnLogout')}
                 >
-                  {isDarkMode ? <Sun size={15} /> : <Moon size={15} />}
+                  <LogOut size={14} />
+                  <span>{t('btnLogout')}</span>
                 </button>
+              </>
+            )}
 
-                <button
-                  type="button"
-                  className="topbar-lang-btn"
-                  onClick={() => setLanguage((l) => l === 'vi' ? 'en' : 'vi')}
-                  title="Switch language / Chụyển ngôn ngữ"
-                >
-                  {language === 'vi' ? 'EN' : 'VI'}
-                </button>
+            <button
+              type="button"
+              className="topbar-icon-btn"
+              onClick={() => setIsDarkMode((prev) => !prev)}
+              title="Chế độ tối/sáng"
+            >
+              {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
 
-                <button
-                  type="button"
-                  className="secondary-button topbar-theme-button"
-                  onClick={() => setShowSettings(true)}
-                  title={t('btnSettings')}
-                  style={{ padding: '0 0.8rem' }}
-                >
-                  <Settings size={15} />
-                </button>
-              </div>
-            </div>
+            <button
+              type="button"
+              className="topbar-icon-btn"
+              onClick={() => setLanguage((l) => l === 'vi' ? 'en' : 'vi')}
+              title="Switch language"
+            >
+              {language === 'vi' ? 'EN' : 'VI'}
+            </button>
+
+            <button
+              type="button"
+              className="topbar-icon-btn"
+              onClick={() => setShowSettings(true)}
+              title={t('btnSettings')}
+            >
+              <Settings size={14} />
+            </button>
           </div>
         </div>
       </header>
