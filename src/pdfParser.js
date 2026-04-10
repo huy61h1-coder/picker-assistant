@@ -175,29 +175,56 @@ function parseStructuredRows(lines) {
       return;
     }
 
-    const locIndex = tokens.findIndex((token, index) => index < 3 && isLocToken(token));
-    const startsNewRow = locIndex !== -1;
+    const skuIndices = [];
+    tokens.forEach((token, index) => {
+      if (isSkuToken(token)) {
+        skuIndices.push(index);
+      }
+    });
 
-    if (!startsNewRow) {
+    if (skuIndices.length === 0) {
       current = appendContinuation(current, line);
       return;
     }
 
-    const nextRecord = finalizeRecord(current, fallbackLocId);
-    if (nextRecord) {
-      records.push(nextRecord);
-      fallbackLocId = Math.max(fallbackLocId, nextRecord.locId + 1);
-    }
+    skuIndices.forEach((skuIdx, arrayPosition) => {
+      const nextRecord = finalizeRecord(current, fallbackLocId);
+      if (nextRecord) {
+        records.push(nextRecord);
+        fallbackLocId = Math.max(fallbackLocId, nextRecord.locId + 1);
+      }
 
-    const skuIndex = tokens.findIndex((token, index) => index > locIndex && isSkuToken(token));
-    const nameTokens =
-      skuIndex >= 0 ? tokens.slice(skuIndex + 1) : tokens.slice(Math.min(tokens.length, locIndex + 1));
+      let foundLocId = null;
+      const startBoundary = arrayPosition > 0 ? skuIndices[arrayPosition - 1] + 1 : 0;
+      
+      for (let i = skuIdx - 1; i >= Math.max(startBoundary, skuIdx - 3); i -= 1) {
+        if (isLocToken(tokens[i])) {
+          foundLocId = Number(tokens[i]);
+          break;
+        }
+      }
 
-    current = {
-      locId: Number(tokens[locIndex]),
-      sku: skuIndex >= 0 ? tokens[skuIndex] : '',
-      name: cleanName(nameTokens.join(' ')),
-    };
+      let nameEnd = tokens.length;
+      if (arrayPosition < skuIndices.length - 1) {
+        const nextSkuIdx = skuIndices[arrayPosition + 1];
+        let nextHasLoc = -1;
+        for (let i = nextSkuIdx - 1; i >= Math.max(skuIdx + 1, nextSkuIdx - 3); i -= 1) {
+          if (isLocToken(tokens[i])) {
+            nextHasLoc = i;
+            break;
+          }
+        }
+        nameEnd = nextHasLoc !== -1 ? nextHasLoc : nextSkuIdx;
+      }
+
+      const nameTokens = tokens.slice(skuIdx + 1, nameEnd);
+
+      current = {
+        locId: foundLocId,
+        sku: tokens[skuIdx],
+        name: cleanName(nameTokens.join(' ')),
+      };
+    });
   });
 
   const lastRecord = finalizeRecord(current, fallbackLocId);
@@ -217,22 +244,31 @@ function parseSkuFallback(lines) {
       return;
     }
 
-    const skuMatch = line.match(/\b\d{6,14}\b/);
-    if (!skuMatch) {
+    const regex = /\b\d{6,14}\b/g;
+    let match;
+    const matches = [];
+    while ((match = regex.exec(line)) !== null) {
+      matches.push({ sku: match[0], index: match.index });
+    }
+
+    if (!matches.length) {
       return;
     }
 
-    const name = cleanName(line.slice((skuMatch.index || 0) + skuMatch[0].length));
-    if (!name) {
-      return;
-    }
+    matches.forEach((m, idx) => {
+      const nextIndex = idx < matches.length - 1 ? matches[idx + 1].index : line.length;
+      const rawName = line.slice(m.index + m.sku.length, nextIndex);
+      const name = cleanName(rawName);
 
-    records.push({
-      locId: fallbackLocId,
-      sku: skuMatch[0],
-      name,
+      if (name) {
+        records.push({
+          locId: fallbackLocId,
+          sku: m.sku,
+          name,
+        });
+        fallbackLocId += 1;
+      }
     });
-    fallbackLocId += 1;
   });
 
   return dedupeRecords(records);
