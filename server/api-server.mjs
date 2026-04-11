@@ -164,12 +164,16 @@ async function writeState(nextState) {
 function readRequestBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Request body read timeout'));
+    }, 5000);
 
     request.on('data', (chunk) => {
       chunks.push(chunk);
     });
 
     request.on('end', () => {
+      clearTimeout(timeoutId);
       try {
         const raw = Buffer.concat(chunks).toString('utf8');
         resolve(raw ? JSON.parse(raw) : {});
@@ -178,7 +182,10 @@ function readRequestBody(request) {
       }
     });
 
-    request.on('error', reject);
+    request.on('error', (err) => {
+      clearTimeout(timeoutId);
+      reject(err);
+    });
   });
 }
 
@@ -240,6 +247,8 @@ function requireSession(request, response) {
 }
 
 const server = createServer(async (request, response) => {
+  console.log(`[${new Date().toISOString()}] ${request.method} ${request.url}`);
+
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -257,6 +266,7 @@ const server = createServer(async (request, response) => {
 
   if (request.url === '/api/auth/login' && request.method === 'POST') {
     try {
+      console.log('Processing login request...');
       const body = await readRequestBody(request);
       const username = String(body?.username || '').trim().toLowerCase();
       const password = String(body?.password || '');
@@ -270,13 +280,17 @@ const server = createServer(async (request, response) => {
       const user = users.find((item) => String(item.username || '').toLowerCase() === username);
 
       if (!user || user.passwordHash !== hashPassword(password)) {
+        console.log(`Login failed for user: ${username}`);
         sendJson(response, 401, { error: 'Sai tai khoan hoac mat khau.' });
         return;
       }
 
-      sendJson(response, 200, createSession(user));
-    } catch {
-      sendJson(response, 400, { error: 'Invalid JSON payload.' });
+      const session = createSession(user);
+      console.log(`Login success: ${username}, token: ${session.token.slice(0, 8)}...`);
+      sendJson(response, 200, session);
+    } catch (error) {
+      console.error('Login error:', error.message);
+      sendJson(response, 400, { error: 'Invalid request or timeout.' });
     }
     return;
   }

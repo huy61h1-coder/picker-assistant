@@ -233,7 +233,14 @@ export async function updateUser(userId, patch) {
     updatedAt: new Date().toISOString(),
   });
 
+  if (patch?.password && String(patch.password).length >= 4) {
+    next.passwordHash = hashPassword(patch.password);
+  }
+
   if (next.role === 'admin') {
+    next.permissions.pog = true;
+    next.permissions.loss = true;
+    next.permissions.stock = true;
     next.permissions.adminUsers = true;
   }
 

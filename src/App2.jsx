@@ -11,6 +11,7 @@ import {
   FileUp,
   History,
   Image as ImageIcon,
+  LayoutGrid,
   ListChecks,
   Loader2,
   LogIn,
@@ -24,6 +25,9 @@ import {
   TableProperties,
   Target,
   UserRound,
+  UserPlus,
+  Users,
+  ShieldCheck,
   X,
   Moon,
   Sun,
@@ -41,6 +45,17 @@ import {
   normaliseSearchText,
   persistToStorage,
 } from './utils';
+
+const ACCENT_COLORS = [
+  { id: 'indigo', hex: '#6366f1', rgb: '99, 102, 241', name: 'Indigo' },
+  { id: 'blue', hex: '#3b82f6', rgb: '59, 130, 246', name: 'Blue' },
+  { id: 'emerald', hex: '#10b981', rgb: '16, 185, 129', name: 'Emerald' },
+  { id: 'rose', hex: '#f43f5e', rgb: '244, 63, 94', name: 'Rose' },
+  { id: 'amber', hex: '#f59e0b', rgb: '245, 158, 11', name: 'Amber' },
+  { id: 'violet', hex: '#8b5cf6', rgb: '139, 92, 246', name: 'Violet' },
+  { id: 'teal', hex: '#14b8a6', rgb: '20, 184, 166', name: 'Teal' },
+  { id: 'graphite', hex: '#4b5563', rgb: '75, 85, 99', name: 'Graphite' },
+];
 
 const STOCK_OPTIONS = getStockControlOptions();
 const AUTH_TOKEN_STORAGE_KEY = 'picker-assistant-auth-token';
@@ -401,6 +416,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [language, setLanguage] = useState(() => localStorage.getItem('lang') || 'vi');
   const [selectedFont, setSelectedFont] = useState(() => localStorage.getItem('appFont') || 'Nunito');
+  const [accentColor, setAccentColor] = useState(() => localStorage.getItem('appAccentColor') || '#6366f1');
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
@@ -417,6 +433,16 @@ export default function App() {
     document.documentElement.style.setProperty('--app-font', `'${selectedFont}'`);
     localStorage.setItem('appFont', selectedFont);
   }, [selectedFont]);
+
+  useEffect(() => {
+    localStorage.setItem('appAccentColor', accentColor);
+    document.documentElement.style.setProperty('--accent-primary', accentColor);
+    
+    const selected = ACCENT_COLORS.find(c => c.hex === accentColor);
+    if (selected?.rgb) {
+      document.documentElement.style.setProperty('--accent-rgb', selected.rgb);
+    }
+  }, [accentColor]);
 
   useEffect(() => {
     localStorage.setItem('lang', language);
@@ -443,12 +469,18 @@ export default function App() {
   const [cameraPermissionState, setCameraPermissionState] = useState('unknown');
   const [toast, setToast] = useState(null);
   const [showManagePogModal, setShowManagePogModal] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [authToken, setAuthToken] = useState(() => window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '');
   const [authUser, setAuthUser] = useState(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showManageUsersModal, setShowManageUsersModal] = useState(false);
+  const [accountTab, setAccountTab] = useState('profile'); // 'profile' or 'members'
+  const [usersList, setUsersList] = useState([]);
+  const [isManagingUsers, setIsManagingUsers] = useState(false);
   const [savingStockKey, setSavingStockKey] = useState('');
 
   const [showAiModal, setShowAiModal] = useState(false);
@@ -962,7 +994,7 @@ export default function App() {
         window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
         setAuthToken('');
         setAuthUser(null);
-        setToast(buildToast('error', error.message || 'Phiên đăng nhập đã hết hạn.'));
+        setToast(buildToast('error', error.message || t('errSessionExpired')));
       }
     }
 
@@ -1002,7 +1034,7 @@ export default function App() {
             setAuthUser(null);
 
             if (!silent) {
-              setToast(buildToast('error', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.'));
+              setToast(buildToast('error', t('errSessionExpired')));
             }
           }
 
@@ -1123,7 +1155,7 @@ export default function App() {
   const downloadPogData = (lineKey) => {
     const data = aisleProducts[lineKey] || [];
     if (!data.length) {
-      setToast(buildToast('error', 'Không có dữ liệu POG để tải xuống.'));
+      setToast(buildToast('error', t('errNoDataToDownload')));
       return;
     }
 
@@ -1146,11 +1178,11 @@ export default function App() {
     worksheet['!cols'] = columnWidths;
 
     XLSX.writeFile(workbook, `POG_${lineKey}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    setToast(buildToast('success', `Đã tải xuống POG ${lineKey}.`));
+    setToast(buildToast('success', t('successDownloadPog', lineKey)));
   };
 
   const deletePogData = (lineKey) => {
-    if (!window.confirm(`Bạn có chắc muốn xóa vĩnh viễn POG của ${lineKey} không? Dữ liệu không thể phục hồi.`)) {
+    if (!window.confirm(t('confirmDeletePog', lineKey))) {
       return;
     }
     
@@ -1165,13 +1197,13 @@ export default function App() {
       setSelectedId(null);
     }
     
-    setToast(buildToast('success', `Đã xóa POG ${lineKey}.`));
+    setToast(buildToast('success', t('successDeletePog', lineKey)));
   };
 
   function openSyncModal() {
     if (isReadOnly) {
       setShowLoginModal(true);
-      setToast(buildToast('error', 'Vui lòng đăng nhập để sử dụng tính năng cập nhật POG.'));
+      setToast(buildToast('error', t('errLoginRequired')));
       return;
     }
 
@@ -1184,18 +1216,9 @@ export default function App() {
     setShowAiModal(true);
   }
 
-  async function handleLoginSubmit(event) {
-    event.preventDefault();
-
-    const username = loginUsername.trim();
-    const password = loginPassword;
-
-    if (!username || !password) {
-      setToast(buildToast('error', 'Vui lòng nhập đầy đủ tài khoản và mật khẩu.'));
-      return;
-    }
-
-    setIsLoggingIn(true);
+  async function authLogin(username, password) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
       const response = await fetch('/api/auth/login', {
@@ -1203,28 +1226,115 @@ export default function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          username,
-          password,
-        }),
+        body: JSON.stringify({ username, password }),
+        signal: controller.signal,
       });
 
-      const payload = await response.json().catch(() => ({}));
-
-      if (!response.ok || !payload?.token) {
-        throw new Error(payload?.error || `Đăng nhập thất bại (${response.status}).`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || errorData.error || `Login failed (${response.status})`);
       }
 
-      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, payload.token);
-      setAuthToken(payload.token);
-      setAuthUser(payload.user || null);
-      setLoginPassword('');
-      setShowLoginModal(false);
-      setToast(buildToast('success', `Xin chao ${payload?.user?.displayName || payload?.user?.username || username}.`));
+      return response.json();
     } catch (error) {
-      setToast(buildToast('error', error.message || 'Đăng nhập thất bại.'));
+      if (error.name === 'AbortError') {
+        throw new Error('Yêu cầu đăng nhập quá hạn (10s). Vui lòng kiểm tra kết nối mạng.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async function handleLoginSubmit(event) {
+    event.preventDefault();
+
+    const username = loginUsername.trim();
+    const password = loginPassword;
+
+    if (!username || !password) {
+      setToast(buildToast('error', t('errFillLogin')));
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setAuthError('');
+
+    try {
+      const payload = await authLogin(username, password);
+      setAuthToken(payload.token);
+      setAuthUser(payload.user);
+      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, payload.token);
+      setShowLoginModal(false);
+      
+      const welcomeName = payload?.user?.displayName || payload?.user?.username || username;
+      setToast(buildToast('success', t('successLogin', welcomeName)));
+    } catch (error) {
+      setAuthError(error.message || t('errLoginFailed'));
+      setToast(buildToast('error', error.message || t('errLoginFailed')));
     } finally {
       setIsLoggingIn(false);
+    }
+  }
+
+  async function fetchUsersList() {
+    if (!authToken) return;
+    try {
+      const response = await fetch('/api/admin/users', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUsersList(data.users || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
+  }
+
+  async function handleCreateUser(payload) {
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || t('errUserCreateFailed'));
+      }
+      const data = await response.json();
+      setUsersList(data.users);
+      setToast(buildToast('success', t('msgUserCreated')));
+      return true;
+    } catch (error) {
+      setToast(buildToast('error', error.message));
+      return false;
+    }
+  }
+
+  async function handleUpdateUser(userId, patch) {
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ id: userId, patch })
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || t('errUserUpdateFailed'));
+      }
+      const data = await response.json();
+      setUsersList(data.users);
+      setToast(buildToast('success', t('msgUserUpdated')));
+    } catch (error) {
+      setToast(buildToast('error', error.message));
     }
   }
 
@@ -1322,7 +1432,7 @@ export default function App() {
 
   async function processUploadedPdf() {
     if (!uploadFile) {
-      setToast(buildToast('error', 'Vui long tai len tep PDF truoc khi phan tich.'));
+      setToast(buildToast('error', t('errUploadPdfFirst')));
       return;
     }
 
@@ -1341,7 +1451,7 @@ export default function App() {
       setAiStep(3);
     } catch (error) {
       setAiStep(1);
-      setToast(buildToast('error', error.message || 'Khong the phan tich tep PDF.'));
+      setToast(buildToast('error', error.message || t('errPdfParseFailed')));
     } finally {
       setIsAiProcessing(false);
     }
@@ -1358,7 +1468,7 @@ export default function App() {
     );
 
     if (cleanedItems.length === 0) {
-      setToast(buildToast('error', 'Khong co du lieu hop le de cap nhat.'));
+      setToast(buildToast('error', t('errNoValidData')));
       return;
     }
 
@@ -1373,6 +1483,7 @@ export default function App() {
         }
       : aisleVisuals;
 
+    setIsAiProcessing(true);
     try {
       await saveSharedState(nextProducts, nextVisuals, lossAudits);
       setSelectedId(key);
@@ -1380,20 +1491,20 @@ export default function App() {
       setToast(
         buildToast(
           'success',
-          `Dong bo hoan tat: da nap ${cleanedItems.length} san pham vao ${key}${
-            extractedVisual?.src ? ' kem hinh line.' : '.'
-          }`,
+          t('msgSyncComplete', cleanedItems.length, key, !!extractedVisual?.src),
         ),
       );
     } catch (error) {
-      setToast(buildToast('error', error.message || 'Khong the luu du lieu dung chung.'));
+      setToast(buildToast('error', error.message || t('errSaveSharedFailed')));
+    } finally {
+      setIsAiProcessing(false);
     }
   }
 
   async function handleStockUpdate(product, nextStatus) {
     if (isReadOnly) {
       setShowLoginModal(true);
-      setToast(buildToast('error', 'Vui lòng đăng nhập để cập nhật tồn kho.'));
+      setToast(buildToast('error', t('errLoginRequired')));
       return;
     }
 
@@ -1431,7 +1542,7 @@ export default function App() {
       await saveSharedState(nextProducts, aisleVisuals, lossAudits);
     } catch (error) {
       setAisleProducts(previousProducts);
-      setToast(buildToast('error', error.message || 'Không lưu được thông tin tồn kho.'));
+      setToast(buildToast('error', error.message || t('errStockSaveFailed')));
     } finally {
       setSavingStockKey((current) => (current === saveKey ? '' : current));
     }
@@ -1602,12 +1713,12 @@ export default function App() {
 
   function openBarcodeScanner() {
     if (cameraPermissionState === 'unsupported') {
-      setToast(buildToast('error', 'Thiết bị/trình duyệt này không hỗ trợ camera barcode.'));
+      setToast(buildToast('error', t('errScannerNotSupported')));
       return;
     }
 
     if (cameraPermissionState === 'denied') {
-      setToast(buildToast('error', 'Camera đang bị chặn. Hãy cấp quyền camera trong trình duyệt.'));
+      setToast(buildToast('error', t('errCameraBlocked')));
       return;
     }
 
@@ -1620,7 +1731,7 @@ export default function App() {
     const barcodeInput = normaliseProductCode(rawCode);
 
     if (!barcodeInput) {
-      setToast(buildToast('error', 'Vui lòng nhập barcode hoặc SKU trước khi quét.'));
+      setToast(buildToast('error', t('errNeedInputBeforeScan')));
       return false;
     }
 
@@ -1630,7 +1741,7 @@ export default function App() {
     const matched = productCodeLookup.get(barcodeInput);
 
     if (!matched) {
-      setToast(buildToast('error', `Khong tim thay san pham cho ma ${String(rawCode || '').trim()}.`));
+      setToast(buildToast('error', t('errNotFoundProductCode', String(rawCode || '').trim())));
       return false;
     }
 
@@ -1683,7 +1794,7 @@ export default function App() {
     setToast(
       buildToast(
         'success',
-        `Đã ${sourceLabel} ${matched.name || matched.sku || matched.barcode || 'sản phẩm'} thành công.`,
+        t('msgScanned', sourceLabel, matched.name || matched.sku || matched.barcode || 'sản phẩm'),
       ),
     );
 
@@ -1755,7 +1866,7 @@ export default function App() {
     const exportItems = sourceAudit?.items || lossDraftItems;
 
     if (!Array.isArray(exportItems) || exportItems.length === 0) {
-      setToast(buildToast('error', 'Không có dữ liệu để xuất Excel.'));
+      setToast(buildToast('error', t('errNoDataToExport')));
       return;
     }
 
@@ -1822,9 +1933,9 @@ export default function App() {
       XLSX.utils.book_append_sheet(workbook, detailSheet, LOSS_EXPORT_SHEET_NAME);
       XLSX.writeFile(workbook, fileName);
 
-      setToast(buildToast('success', `Đã xuất file ${fileName}.`));
+      setToast(buildToast('success', t('successExportExcel', fileName)));
     } catch (error) {
-      setToast(buildToast('error', error.message || 'Không thể xuất file Excel.'));
+      setToast(buildToast('error', error.message || t('errExportExcelFailed')));
     } finally {
       setIsExportingLossFile(false);
     }
@@ -1833,12 +1944,12 @@ export default function App() {
   async function handleSaveLossAudit() {
     if (isReadOnly) {
       setShowLoginModal(true);
-      setToast(buildToast('error', 'Vui lòng đăng nhập để lưu kỳ kiểm loss dùng chung.'));
+      setToast(buildToast('error', t('errLoginRequired')));
       return;
     }
 
     if (lossDraftItems.length === 0) {
-      setToast(buildToast('error', 'Kỳ kiểm loss đang rỗng. Hãy quét barcode trước khi lưu.'));
+      setToast(buildToast('error', t('errEmptyLossAudit')));
       return;
     }
 
@@ -1889,11 +2000,11 @@ export default function App() {
       setToast(
         buildToast(
           'success',
-          `Đã lưu kỳ ${periodName}: ${nextAudit.itemCount} SKU, tổng loss ${nextAudit.totalLossQuantity}.`,
+          t('msgSaveLossComplete', periodName, nextAudit.itemCount, nextAudit.totalLossQuantity),
         ),
       );
     } catch (error) {
-      setToast(buildToast('error', error.message || 'Không lưu được kỳ kiểm loss.'));
+      setToast(buildToast('error', error.message || t('errSaveLossFailed')));
     } finally {
       setIsSavingLossAudit(false);
     }
@@ -2209,7 +2320,7 @@ export default function App() {
           </form>
 
           {checkStockSearchTerm ? (
-             <div style={{ marginTop: '1rem', padding: '1rem', background: '#e0e7ff', borderRadius: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--accent-primary)', borderRadius: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                <span>{t('filteringBy')} <strong>{checkStockSearchTerm}</strong></span>
                <button className="secondary-button" onClick={() => { setCheckStockSearchTerm(''); setCheckStockBarcodeInput(''); }}>{t('btnClearFilter')}</button>
              </div>
@@ -2238,7 +2349,7 @@ export default function App() {
                         <span>Hệ thống</span>
                         <strong>{product.systemStock ?? '--'}</strong>
                       </div>
-                      <div className="loss-delta-pill" style={{ background: '#e0f2fe', color: '#0369a1' }}>
+                      <div className="loss-delta-pill" style={{ background: 'var(--accent-primary)', color: '#fff' }}>
                         <span>Thực tế</span>
                         <strong>{product.actualStockFromLoss}</strong>
                       </div>
@@ -2598,28 +2709,47 @@ export default function App() {
               type="button"
               className={activeModule === 'pog' ? 'is-active' : ''}
               onClick={() => setActiveModule('pog')}
-            >POG</button>
+            >
+              <LayoutGrid size={18} />
+              <span>POG</span>
+            </button>
             <button
               type="button"
               className={activeModule === 'loss' ? 'is-active' : ''}
               onClick={() => setActiveModule('loss')}
-            >Check Loss</button>
+            >
+              <ClipboardList size={18} />
+              <span>{t('moduleLoss')}</span>
+            </button>
             <button
               type="button"
               className={activeModule === 'stock' ? 'is-active' : ''}
               onClick={() => setActiveModule('stock')}
-            >Check Stock</button>
+            >
+              <CheckCircle2 size={18} />
+              <span>{t('moduleStock')}</span>
+            </button>
           </div>
 
           {/* Searchbox */}
-          <label className="searchbox">
+          <label className={`searchbox ${mobileSearchOpen ? 'is-mobile-open' : ''}`}>
             <Search size={14} />
             <input
               type="text"
               value={topbarSearchValue}
               onChange={(event) => handleTopbarSearchChange(event.target.value)}
               placeholder={topbarSearchPlaceholder}
+              autoFocus={mobileSearchOpen}
             />
+            {mobileSearchOpen && (
+              <button 
+                type="button" 
+                className="mobile-search-close" 
+                onClick={() => setMobileSearchOpen(false)}
+              >
+                <X size={14} />
+              </button>
+            )}
           </label>
 
           {/* Quick Actions */}
@@ -2632,7 +2762,7 @@ export default function App() {
                   onClick={() => setShowManagePogModal(true)}
                 >
                   <Database size={14} />
-                  <span>Dữ liệu POG</span>
+                  <span>{t('btnManagePog')}</span>
                 </button>
                 <button
                   type="button"
@@ -2679,29 +2809,41 @@ export default function App() {
 
             <button
               type="button"
-              className="topbar-icon-btn"
+              className="topbar-icon-btn with-label"
               onClick={() => setIsDarkMode((prev) => !prev)}
-              title="Chế độ tối/sáng"
+              title={isDarkMode ? t('themeLight') : t('themeDark')}
             >
               {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+              <span>{isDarkMode ? t('themeLight') : t('themeDark')}</span>
             </button>
 
             <button
               type="button"
-              className="topbar-icon-btn"
+              className="topbar-icon-btn with-label"
               onClick={() => setLanguage((l) => l === 'vi' ? 'en' : 'vi')}
               title="Switch language"
             >
-              {language === 'vi' ? 'EN' : 'VI'}
+              <Users size={14} />
+              <span>{language === 'vi' ? 'English' : 'Tiếng Việt'}</span>
             </button>
 
             <button
               type="button"
-              className="topbar-icon-btn"
+              className="topbar-icon-btn mobile-search-toggle"
+              onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+              title="Tìm kiếm"
+            >
+              <Search size={14} />
+            </button>
+
+            <button
+              type="button"
+              className="topbar-settings-btn"
               onClick={() => setShowSettings(true)}
               title={t('btnSettings')}
             >
-              <Settings size={14} />
+              <Settings size={15} />
+              <span>{t('settingsTitle')}</span>
             </button>
           </div>
         </div>
@@ -2757,7 +2899,9 @@ export default function App() {
             onClick={() => setShowManagePogModal(true)}
             title="Dữ liệu POG"
           >
-            <Database size={16} />
+            <div className="icon-box">
+              <Database size={18} />
+            </div>
             <span>Dữ liệu POG</span>
           </button>
           
@@ -2767,7 +2911,9 @@ export default function App() {
             onClick={openSyncModal}
             title={isReadOnly ? 'Đăng nhập để cập nhật POG' : 'Cập nhật POG'}
           >
-            <Sparkles size={16} />
+            <div className="icon-box">
+              <Sparkles size={18} />
+            </div>
             <span>Cập nhật POG</span>
           </button>
 
@@ -2778,7 +2924,9 @@ export default function App() {
               onClick={() => setShowLoginModal(true)}
               title="Đăng nhập để chỉnh sửa"
             >
-              <LogIn size={16} />
+              <div className="icon-box">
+                <LogIn size={18} />
+              </div>
               <span>Đăng nhập</span>
             </button>
           ) : (
@@ -2788,7 +2936,9 @@ export default function App() {
               onClick={handleLogout}
               title="Đăng xuất"
             >
-              <LogOut size={16} />
+              <div className="icon-box">
+                <LogOut size={18} />
+              </div>
               <span>Đăng xuất</span>
             </button>
           )}
@@ -2935,7 +3085,7 @@ export default function App() {
             <header className="modal-header">
               <div className="modal-title">
                 <Database size={24} />
-                <span>Quản lý dữ liệu POG</span>
+                <span>{t('managePogTitle')}</span>
               </div>
               <button type="button" className="icon-button icon-button-light" onClick={() => setShowManagePogModal(false)}>
                 <X size={24} />
@@ -2952,12 +3102,12 @@ export default function App() {
                       <div key={lineKey} className="extract-card">
                         <div className="extract-column-head">
                           <strong>Line {lineKey}</strong>
-                          <span style={{marginLeft: '0.4rem'}}>{items.length} mặt hàng</span>
+                          <span style={{marginLeft: '0.4rem'}}>{t('msgItems', items.length)}</span>
                         </div>
                         <div style={{ display: 'flex', gap: '0.6rem' }}>
                           <button type="button" className="secondary-button" onClick={() => downloadPogData(lineKey)}>
                             <Download size={15} />
-                            Tải Excel
+                            {t('btnDownloadExcel')}
                           </button>
                           <button type="button" className="secondary-button" style={{ color: '#dc2626' }} title="Xóa POG Line này" onClick={() => deletePogData(lineKey)}>
                             <Trash2 size={15} />
@@ -2968,7 +3118,7 @@ export default function App() {
                 ) : (
                   <div className="empty-state">
                     <Database size={42} strokeWidth={1.4} />
-                    <p>Hệ thống chưa có dữ liệu POG nào được lưu.</p>
+                    <p>{t('emptyPogStorage')}</p>
                   </div>
                 )}
               </div>
@@ -3061,6 +3211,14 @@ export default function App() {
 
               {aiStep === 3 ? (
                 <div className="review-step">
+                  {isAiProcessing && (
+                    <div className="processing-overlay">
+                      <div className="spinner-ring">
+                        <Loader2 className="animate-spin" size={38} />
+                      </div>
+                      <p>{t('btnSaving')}</p>
+                    </div>
+                  )}
                   <div className="result-banner">
                     <div className="result-icon">
                       <Check size={22} strokeWidth={4} />
@@ -3103,11 +3261,12 @@ export default function App() {
                   </div>
 
                   <div className="review-actions">
-                    <button type="button" className="secondary-button" onClick={() => setAiStep(1)}>
+                    <button type="button" className="secondary-button" disabled={isAiProcessing} onClick={() => setAiStep(1)}>
                       {t('btnScanAgain')}
                     </button>
-                    <button type="button" className="success-button" onClick={confirmUpdate}>
-                      {t('btnApply')}
+                    <button type="button" className="success-button" disabled={isAiProcessing} onClick={confirmUpdate}>
+                      <Check size={18} />
+                      <span>{t('btnApply')}</span>
                     </button>
                   </div>
                 </div>
@@ -3116,6 +3275,197 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      {/* ===== ACCOUNT CENTER MODAL (REWORKED) ===== */}
+      {showManageUsersModal ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowManageUsersModal(false)}>
+          <section className="modal account-center-modal" onClick={(e) => e.stopPropagation()}>
+            <header className="modal-header">
+              <div className="modal-title">
+                <UserRound size={24} />
+                <span>{t('accountCenterTitle')}</span>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setShowManageUsersModal(false)}>
+                <X size={24} />
+              </button>
+            </header>
+
+            <div className="account-center-tabs">
+              <button 
+                className={`tab-btn ${accountTab === 'profile' ? 'is-active' : ''}`}
+                onClick={() => setAccountTab('profile')}
+              >
+                <UserRound size={16} />
+                <span>{t('tabProfile')}</span>
+              </button>
+              {authUser?.role === 'admin' && (
+                <button 
+                  className={`tab-btn ${accountTab === 'members' ? 'is-active' : ''}`}
+                  onClick={() => setAccountTab('members')}
+                >
+                  <Users size={16} />
+                  <span>{t('tabMembers')}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="modal-body">
+              {accountTab === 'profile' ? (
+                <div className="profile-tab-content">
+                  <form 
+                    className="account-form"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const fd = new FormData(e.currentTarget);
+                      const displayName = fd.get('displayName');
+                      const password = fd.get('password');
+                      const patch = { displayName };
+                      if (password) patch.password = password;
+                      
+                      await handleUpdateUser(authUser.id, patch);
+                      // Update local user info if needed
+                      setAuthUser(prev => ({ ...prev, displayName }));
+                      e.currentTarget.reset();
+                    }}
+                  >
+                    <div className="form-grid">
+                      <div className="form-field">
+                        <label>{t('lblUsername')}</label>
+                        <input type="text" value={authUser?.username} disabled className="readonly-input" />
+                      </div>
+                      <div className="form-field">
+                        <label>{t('lblDisplayName')}</label>
+                        <input name="displayName" type="text" defaultValue={authUser?.displayName} required />
+                      </div>
+                      <div className="form-field">
+                        <label>{t('lblPassword')} ({t('btnChangePassword')})</label>
+                        <input name="password" type="password" placeholder="••••••" />
+                      </div>
+                    </div>
+                    <button type="submit" className="primary-button save-profile-btn">
+                      <Check size={18} />
+                      <span>{t('btnSave')}</span>
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <div className="members-tab-content">
+                  <form 
+                    className="add-user-form"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const fd = new FormData(e.currentTarget);
+                      const payload = Object.fromEntries(fd.entries());
+                      const ok = await handleCreateUser(payload);
+                      if (ok) e.currentTarget.reset();
+                    }}
+                  >
+                    <div className="form-grid compact-grid">
+                      <div className="form-field">
+                        <label>{t('lblUsername')}</label>
+                        <input name="username" type="text" required placeholder="user01" />
+                      </div>
+                      <div className="form-field">
+                        <label>{t('lblPassword')}</label>
+                        <input name="password" type="password" required placeholder="••••" />
+                      </div>
+                      <div className="form-field">
+                        <label>{t('lblRole')}</label>
+                        <select name="role" defaultValue="picker">
+                          <option value="picker">{t('rolePicker')}</option>
+                          <option value="admin">{t('roleAdmin')}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button type="submit" className="primary-button add-user-btn">
+                      <UserPlus size={18} />
+                      <span>{t('btnCreateUser')}</span>
+                    </button>
+                  </form>
+
+                  <div className="user-table-wrapper">
+                    <table className="user-table">
+                      <thead>
+                        <tr>
+                          <th>{t('lblUsername')}</th>
+                          <th>{t('lblDisplayName')}</th>
+                          <th>{t('lblRole')}</th>
+                          <th>{t('lblPermissions')}</th>
+                          <th>{t('btnResetPassword')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {usersList.map((u) => (
+                          <tr key={u.id} className={u.enabled === false ? 'is-disabled' : ''}>
+                            <td>
+                              <div className="user-cell-main">
+                                <strong>{u.username}</strong>
+                                <div className="toggle-switch mini">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={u.enabled !== false} 
+                                    onChange={(e) => handleUpdateUser(u.id, { enabled: e.target.checked })}
+                                  />
+                                  <span className="toggle-slider"></span>
+                                </div>
+                              </div>
+                            </td>
+                            <td>{u.displayName}</td>
+                            <td>
+                              <select 
+                                className="inline-select"
+                                value={u.role}
+                                onChange={(e) => handleUpdateUser(u.id, { role: e.target.value })}
+                              >
+                                <option value="picker">{t('rolePicker')}</option>
+                                <option value="admin">{t('roleAdmin')}</option>
+                              </select>
+                            </td>
+                            <td>
+                              <div className="permission-pills">
+                                {['pog', 'loss', 'stock'].map(p => (
+                                  <button
+                                    key={p}
+                                    type="button"
+                                    className={`perm-pill ${u.permissions?.[p] ? 'is-active' : ''}`}
+                                    disabled={u.role === 'admin'}
+                                    onClick={() => {
+                                      const nextPerms = { ...u.permissions, [p]: !u.permissions?.[p] };
+                                      handleUpdateUser(u.id, { permissions: nextPerms });
+                                    }}
+                                  >
+                                    {p.toUpperCase()}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                            <td>
+                              <button 
+                                type="button" 
+                                className="icon-button"
+                                title={t('btnResetPassword')}
+                                onClick={() => {
+                                  const newPass = window.prompt(`${t('btnResetPassword')} for ${u.username}:`);
+                                  if (newPass && newPass.length >= 4) {
+                                    handleUpdateUser(u.id, { password: newPass });
+                                  }
+                                }}
+                              >
+                                <Sparkles size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
 
       {/* ===== SETTINGS PANEL ===== */}
       {showSettings ? (
@@ -3134,76 +3484,141 @@ export default function App() {
             </div>
 
             <div className="settings-body">
-              {/* Language section */}
-              <div className="settings-section">
-                <p className="settings-section-title">{t('settingsLanguage')}</p>
-                <div className="lang-toggle">
-                  <button
-                    type="button"
-                    className={`lang-toggle-btn ${language === 'vi' ? 'lang-active' : ''}`}
-                    onClick={() => setLanguage('vi')}
-                  >
-                    🇻🇳 Tiếng Việt
-                  </button>
-                  <button
-                    type="button"
-                    className={`lang-toggle-btn ${language === 'en' ? 'lang-active' : ''}`}
-                    onClick={() => setLanguage('en')}
-                  >
-                    🇬🇧 English
-                  </button>
-                </div>
-              </div>
-
-              {/* Theme section */}
-              <div className="settings-section">
-                <p className="settings-section-title">{t('settingsTheme')}</p>
-                <div className="theme-toggle-row">
-                  <button
-                    type="button"
-                    className={`theme-btn ${!isDarkMode ? 'theme-btn-active' : ''}`}
-                    onClick={() => setIsDarkMode(false)}
-                  >
-                    <Sun size={15} />
-                    <span>{t('themeLight')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`theme-btn ${isDarkMode ? 'theme-btn-active' : ''}`}
-                    onClick={() => setIsDarkMode(true)}
-                  >
-                    <Moon size={15} />
-                    <span>{t('themeDark')}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Font section */}
-              <div className="settings-section">
-                <p className="settings-section-title">{t('settingsFont')}</p>
-                <div className="font-grid">
-                  {FONT_OPTIONS.map((font) => (
-                    <button
-                      key={font.family}
-                      type="button"
-                      className={`font-card ${selectedFont === font.family ? 'font-card-active' : ''}`}
-                      onClick={() => setSelectedFont(font.family)}
-                    >
-                      <span
-                        className="font-card-preview"
-                        style={{ fontFamily: `'${font.family}', system-ui, sans-serif` }}
-                      >
-                        Abc 123
-                      </span>
-                      <span className="font-card-name">{font.name}</span>
+              <div className="settings-compact-grid">
+                <div className="settings-cell">
+                  <label className="settings-label">{t('settingsTheme')}</label>
+                  <div className="compact-toggle">
+                    <button className={!isDarkMode ? 'active' : ''} onClick={() => setIsDarkMode(false)}>
+                      <div className="icon-box mini">
+                        <Sun size={12} />
+                      </div>
+                      <span>{t('themeLight')}</span>
                     </button>
-                  ))}
+                    <button className={isDarkMode ? 'active' : ''} onClick={() => setIsDarkMode(true)}>
+                      <div className="icon-box mini">
+                        <Moon size={12} />
+                      </div>
+                      <span>{t('themeDark')}</span>
+                    </button>
+                  </div>
                 </div>
+                <div className="settings-cell">
+                  <label className="settings-label">{t('settingsLanguage')}</label>
+                  <div className="compact-toggle">
+                    <button className={language === 'vi' ? 'active' : ''} onClick={() => setLanguage('vi')}>
+                      <div className="icon-box mini">
+                         <span style={{ fontSize: '10px' }}>VI</span>
+                      </div>
+                      <span>{t('langVi')}</span>
+                    </button>
+                    <button className={language === 'en' ? 'active' : ''} onClick={() => setLanguage('en')}>
+                      <div className="icon-box mini">
+                         <span style={{ fontSize: '10px' }}>EN</span>
+                      </div>
+                      <span>{t('langEn')}</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="settings-cell wide">
+                  <label className="settings-label">{t('settingsAccentColor')}</label>
+                  <div className="accent-pills-row">
+                    {ACCENT_COLORS.map(c => (
+                      <button 
+                        key={c.id} 
+                        className={`accent-pill ${accentColor === c.hex ? 'active' : ''}`}
+                        style={{ background: c.hex }}
+                        onClick={() => setAccentColor(c.hex)}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="settings-cell wide">
+                  <label className="settings-label">{t('settingsFont')}</label>
+                  <select 
+                    className="compact-select" 
+                    value={selectedFont} 
+                    onChange={(e) => setSelectedFont(e.target.value)}
+                  >
+                    {FONT_OPTIONS.map(f => <option key={f.family} value={f.family}>{f.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="settings-account-minimal">
+                {authUser ? (
+                  <div className="account-row-compact">
+                    <div className="user-mini-info">
+                      <div className="mini-avatar"><UserRound size={16} /></div>
+                      <div className="mini-meta">
+                        <span className="name">{authUser.displayName || authUser.username}</span>
+                        <span className="role">{t(authUser.role === 'admin' ? 'roleAdmin' : 'rolePicker')}</span>
+                      </div>
+                    </div>
+                    <div className="account-mini-actions">
+                      <button 
+                        className="action-btn manage with-text"
+                        onClick={() => {
+                          setShowSettings(false);
+                          setAccountTab('profile');
+                          if (authUser.role === 'admin') fetchUsersList();
+                          setShowManageUsersModal(true);
+                        }}
+                      >
+                        <Settings size={14} />
+                        <span>{t('accountCenterTitle')}</span>
+                      </button>
+                      <button className="action-btn logout with-text" onClick={() => { setShowSettings(false); handleLogout(); }}>
+                        <LogOut size={14} />
+                        <span>{t('btnLogout')}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="login-btn-minimal" onClick={() => { setShowSettings(false); setShowLoginModal(true); }}>
+                    <LogIn size={15} />
+                    <span>{t('btnLogin')}</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
       ) : null}
+
+      {isCompactView && (
+        <nav className="mobile-navigation">
+          <button
+            type="button"
+            className={activeModule === 'pog' ? 'is-active' : ''}
+            onClick={() => setActiveModule('pog')}
+          >
+            <div className="icon-wrapper">
+              <LayoutGrid size={22} strokeWidth={activeModule === 'pog' ? 2.8 : 2} />
+            </div>
+            <span>POG</span>
+          </button>
+          <button
+            type="button"
+            className={activeModule === 'loss' ? 'is-active' : ''}
+            onClick={() => setActiveModule('loss')}
+          >
+            <div className="icon-wrapper">
+              <ClipboardList size={22} strokeWidth={activeModule === 'loss' ? 2.8 : 2} />
+            </div>
+            <span>{t('moduleLoss')}</span>
+          </button>
+          <button
+            type="button"
+            className={activeModule === 'stock' ? 'is-active' : ''}
+            onClick={() => setActiveModule('stock')}
+          >
+            <div className="icon-wrapper">
+              <CheckCircle2 size={22} strokeWidth={activeModule === 'stock' ? 2.8 : 2} />
+            </div>
+            <span>{t('moduleStock')}</span>
+          </button>
+        </nav>
+      )}
 
     </div>
   );

@@ -475,91 +475,172 @@ function scorePage(snapshot, lineId, side, validLocIds) {
   };
 }
 
-async function renderPagePreview(pdfDocument, pageNumber) {
+function calculateMarkerBoundingBox(markers, padding = 0.08) {
+  if (!markers || markers.length === 0) {
+    return { x1: 0, y1: 0, x2: 1, y2: 1 };
+  }
+
+  let x1 = Math.min(...markers.map((m) => m.x));
+  let y1 = Math.min(...markers.map((m) => m.y));
+  let x2 = Math.max(...markers.map((m) => m.x));
+  let y2 = Math.max(...markers.map((m) => m.y));
+
+  // Expand with padding
+  x1 = Math.max(0, x1 - padding * 0.7); // less horizontal padding usually
+  y1 = Math.max(0, y1 - padding);
+  x2 = Math.min(1, x2 + padding * 0.7);
+  y2 = Math.min(1, y2 + padding);
+
+  // If the box is too small, maybe something's wrong, return full page
+  if (x2 - x1 < 0.1 || y2 - y1 < 0.1) {
+    return { x1: 0, y1: 0, x2: 1, y2: 1 };
+  }
+
+  return { x1, y1, x2, y2 };
+}
+
+async function renderPageToCanvas(pdfDocument, pageNumber, scale = 1.3, cropBox = null) {
   const page = await pdfDocument.getPage(pageNumber);
-  const viewport = page.getViewport({ scale: 1.35 });
+  const fullViewport = page.getViewport({ scale });
+
+  if (!cropBox) {
+    const canvas = window.document.createElement('canvas');
+    canvas.width = Math.ceil(fullViewport.width);
+    canvas.height = Math.ceil(fullViewport.height);
+    const context = canvas.getContext('2d', { alpha: false });
+    await page.render({ canvasContext: context, viewport: fullViewport }).promise;
+    return canvas;
+  }
+
+  // Calculate actual pixel coordinates for cropping
+  const sx = cropBox.x1 * fullViewport.width;
+  const sy = cropBox.y1 * fullViewport.height;
+  const sw = (cropBox.x2 - cropBox.x1) * fullViewport.width;
+  const sh = (cropBox.y2 - cropBox.y1) * fullViewport.height;
+
   const canvas = window.document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(sw));
+  canvas.height = Math.max(1, Math.ceil(sh));
   const context = canvas.getContext('2d', { alpha: false });
 
-  canvas.width = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
+  // Render full page to temporary canvas then crop
+  const tempCanvas = window.document.createElement('canvas');
+  tempCanvas.width = Math.ceil(fullViewport.width);
+  tempCanvas.height = Math.ceil(fullViewport.height);
+  const tempContext = tempCanvas.getContext('2d', { alpha: false });
+  await page.render({ canvasContext: tempContext, viewport: fullViewport }).promise;
 
-  await page.render({
-    canvasContext: context,
-    viewport,
-  }).promise;
+  context.drawImage(tempCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  return canvas;
+}
+
+async function renderStitchedVisual(pdfDocument, pageResults) {
+  if (pageResults.length === 1) {
+    const p = pageResults[0];
+    const canvas = await renderPageToCanvas(pdfDocument, p.pageNumber, 1.3, p.cropBox);
+    
+    // Adjust markers for single cropped page
+    const adjustedMarkers = p.markers.map(m => ({
+      ...m,
+      x: (m.x - p.cropBox.x1) / (p.cropBox.x2 - p.cropBox.x1),
+      y: (m.y - p.cropBox.y1) / (p.cropBox.y2 - p.cropBox.y1),
+    }));
+
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      src: canvas.toDataURL('image/jpeg', 0.88),
+      markers: adjustedMarkers,
+    };
+  }
+
+  const canvases = await Promise.all(
+    pageResults.map((p) => renderPageToCanvas(pdfDocument, p.pageNumber, 1.3, p.cropBox))
+  );
+
+  const totalWidth = canvases.reduce((sum, c) => sum + c.width, 0);
+  const maxHeight = Math.max(...canvases.map((c) => c.height));
+
+  const mainCanvas = window.document.createElement('canvas');
+  mainCanvas.width = totalWidth;
+  mainCanvas.height = maxHeight;
+  const ctx = mainCanvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, totalWidth, maxHeight);
+
+  const finalMarkers = [];
+  let currentX = 0;
+
+  canvases.forEach((canvas, idx) => {
+    // Center vertically if heights differ
+    const dy = (maxHeight - canvas.height) / 2;
+    ctx.drawImage(canvas, currentX, dy);
+    
+    const p = pageResults[idx];
+    const pageMarkers = p.markers;
+    const cw = p.cropBox.x2 - p.cropBox.x1;
+    const ch = p.cropBox.y2 - p.cropBox.y1;
+
+    pageMarkers.forEach((m) => {
+      // Local relative in crop box
+      const localRx = (m.x - p.cropBox.x1) / cw;
+      const localRy = (m.y - p.cropBox.y1) / ch;
+
+      finalMarkers.push({
+        ...m,
+        x: (currentX + localRx * canvas.width) / totalWidth,
+        y: (dy + localRy * canvas.height) / maxHeight,
+      });
+    });
+
+    currentX += canvas.width;
+  });
 
   return {
-    pageNumber,
-    width: canvas.width,
-    height: canvas.height,
-    src: canvas.toDataURL('image/jpeg', 0.86),
+    width: totalWidth,
+    height: maxHeight,
+    src: mainCanvas.toDataURL('image/jpeg', 0.8),
+    markers: finalMarkers,
   };
 }
 
-function choosePreferredVisualPage(rankedPages) {
-  if (!rankedPages.length) {
-    return null;
-  }
-
-  const bestPage = rankedPages[0];
-  const candidatePagesByOrder = rankedPages
-    .filter((page) => page.validMarkerCount > 0 || page.allNumberedMarkerCount >= 3)
-    .sort((left, right) => left.pageNumber - right.pageNumber);
-
-  const secondVisualPage = candidatePagesByOrder[1];
-
-  if (!secondVisualPage) {
-    return bestPage;
-  }
-
-  const secondLooksUsable =
-    secondVisualPage.validMarkerCount >= Math.max(3, Math.floor(bestPage.validMarkerCount * 0.45)) ||
-    secondVisualPage.allNumberedMarkerCount >= Math.max(6, Math.floor(bestPage.allNumberedMarkerCount * 0.6));
-
-  return secondLooksUsable ? secondVisualPage : bestPage;
-}
 
 async function extractPlanogramVisual(pdfDocument, pageSnapshots, lineId, side, productLocIds) {
-  const rankedPages = pageSnapshots
+  const scoredPages = pageSnapshots
     .map((snapshot) => scorePage(snapshot, lineId, side, productLocIds))
-    .sort((left, right) => {
-      if (right.validMarkerCount !== left.validMarkerCount) {
-        return right.validMarkerCount - left.validMarkerCount;
-      }
+    .filter((p) => p.validMarkerCount > 0 || p.allNumberedMarkerCount >= 5);
 
-      if (right.coverage !== left.coverage) {
-        return right.coverage - left.coverage;
-      }
-
-      if (right.allNumberedMarkerCount !== left.allNumberedMarkerCount) {
-        return right.allNumberedMarkerCount - left.allNumberedMarkerCount;
-      }
-
-      return right.score - left.score;
-    });
-
-  const bestPage = choosePreferredVisualPage(rankedPages);
-
-  if (
-    !bestPage ||
-    (bestPage.validMarkerCount === 0 && bestPage.allNumberedMarkerCount < 3) ||
-    bestPage.score < 0
-  ) {
+  if (scoredPages.length === 0) {
     return null;
   }
 
-  const preview = await renderPagePreview(pdfDocument, bestPage.pageNumber);
+  const sortedPages = scoredPages.sort((a, b) => a.pageNumber - b.pageNumber);
+  const distinctPages = [];
+  let lastPg = -1;
+  for (const p of sortedPages) {
+    if (p.pageNumber !== lastPg) {
+      distinctPages.push(p);
+      lastPg = p.pageNumber;
+    }
+  }
 
-  return {
-    ...preview,
-    version: 2,
-    markers: bestPage.markers.map((marker) => ({
+  const pageResults = distinctPages.map((p) => ({
+    pageNumber: p.pageNumber,
+    cropBox: calculateMarkerBoundingBox(p.markers),
+    markers: p.markers.map((marker) => ({
       locId: marker.locId,
       x: marker.x,
       y: marker.y,
       emphasis: clamp(marker.fontSize / 18, 0.9, 1.6),
     })),
+  }));
+
+  const merged = await renderStitchedVisual(pdfDocument, pageResults);
+
+  return {
+    ...merged,
+    pageCount: pageResults.length,
+    version: 2,
   };
 }
 
