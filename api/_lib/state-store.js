@@ -421,6 +421,18 @@ export async function writeSharedState(nextState) {
   return payload;
 }
 
+export async function readMasterProducts() {
+  const result = await runKvCommand(['GET', MASTER_STATE_KEY]);
+  const raw = result?.result;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function readSharedVisual(key) {
   const safeKey = String(key || '').trim();
 
@@ -473,4 +485,16 @@ export async function writeSharedVisual(key, visual) {
 
   await writeRawStateToKv(payload);
   return normalizedVisual;
+}
+
+export async function readMasterProducts() {
+  const result = await runKvCommand(['GET', MASTER_STATE_KEY]);
+  const raw = result?.result;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }

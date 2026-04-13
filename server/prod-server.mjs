@@ -14,6 +14,7 @@ import logoutHandler from '../api/auth/logout.js';
 import usersHandler from '../api/admin/users.js';
 import visualHandler from '../api/visual.js';
 import healthHandler from '../api/health.js';
+import masterHandler from '../api/master.js';
 
 const apiRoutes = {
   '/api/state': stateHandler,
@@ -23,7 +24,7 @@ const apiRoutes = {
   '/api/admin/users': usersHandler,
   '/api/visual': visualHandler,
   '/api/health': healthHandler,
-  '/api/master': (await import('../api/master.js')).default,
+  '/api/master': masterHandler,
 };
 
 const MIME_TYPES = {
