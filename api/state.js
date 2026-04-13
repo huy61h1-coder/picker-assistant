@@ -1,6 +1,24 @@
 import { handleOptions, parseRequestBody, requireAuth, sendJson } from './_lib/http.js';
 import { readSharedState, writeSharedState } from './_lib/state-store.js';
 
+function hasModulePermission(user, intent) {
+  if (user?.role === 'admin') {
+    return true;
+  }
+
+  const permissions = user?.permissions || {};
+
+  if (intent === 'loss') {
+    return permissions.loss !== false;
+  }
+
+  if (intent === 'stock') {
+    return permissions.stock !== false;
+  }
+
+  return permissions.pog !== false;
+}
+
 export default async function handler(request, response) {
   if (handleOptions(request, response)) {
     return;
@@ -19,7 +37,7 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'PUT') {
-    const auth = requireAuth(request, response);
+    const auth = await requireAuth(request, response);
 
     if (!auth) {
       return;
@@ -27,6 +45,12 @@ export default async function handler(request, response) {
 
     try {
       const body = await parseRequestBody(request);
+
+      if (!hasModulePermission(auth.user, String(body?.intent || 'pog'))) {
+        sendJson(response, 403, { error: 'Forbidden.' });
+        return;
+      }
+
       const saved = await writeSharedState(body);
       sendJson(response, 200, saved);
     } catch (error) {

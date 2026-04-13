@@ -3,6 +3,26 @@ import { getUsers } from './defaults.js';
 
 const USERS_KEY = 'picker_assistant_users_v1';
 
+function isSeedAdminIdentity(user) {
+  const safeUsername = String(user?.username || '')
+    .trim()
+    .toLowerCase();
+  const safeId = String(user?.id || '').trim();
+
+  return (getUsers() || []).some((item) => {
+    if (item?.role !== 'admin') {
+      return false;
+    }
+
+    const adminUsername = String(item.username || '')
+      .trim()
+      .toLowerCase();
+    const adminId = String(item.id || '').trim();
+
+    return (adminUsername && adminUsername === safeUsername) || (adminId && adminId === safeId);
+  });
+}
+
 function hashPassword(value) {
   return createHash('sha256')
     .update(String(value || ''))
@@ -21,8 +41,9 @@ function normalizePermissions(input) {
 
 function normalizeUser(input) {
   const user = input && typeof input === 'object' ? input : {};
-  const role = user.role === 'admin' ? 'admin' : 'picker';
+  const role = user.role === 'admin' || isSeedAdminIdentity(user) ? 'admin' : 'picker';
   const isAdmin = role === 'admin';
+  const basePermissions = normalizePermissions(user.permissions);
 
   return {
     id: String(user.id || '').trim(),
@@ -30,10 +51,17 @@ function normalizeUser(input) {
     displayName: String(user.displayName || user.username || '').trim(),
     role,
     enabled: user.enabled !== false,
-    permissions: {
-      ...normalizePermissions(user.permissions),
-      adminUsers: isAdmin ? true : normalizePermissions(user.permissions).adminUsers,
-    },
+    permissions: isAdmin
+      ? {
+          pog: true,
+          loss: true,
+          stock: true,
+          adminUsers: true,
+        }
+      : {
+          ...basePermissions,
+          adminUsers: basePermissions.adminUsers,
+        },
     passwordHash: String(user.passwordHash || ''),
     createdAt: user.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -41,14 +69,15 @@ function normalizeUser(input) {
 }
 
 function sanitizeUser(user) {
+  const normalizedUser = normalizeUser(user);
   return {
-    id: user.id,
-    username: user.username,
-    displayName: user.displayName || user.username,
-    role: user.role,
-    enabled: Boolean(user.enabled),
-    permissions: normalizePermissions(user.permissions),
-    updatedAt: user.updatedAt,
+    id: normalizedUser.id,
+    username: normalizedUser.username,
+    displayName: normalizedUser.displayName || normalizedUser.username,
+    role: normalizedUser.role,
+    enabled: Boolean(normalizedUser.enabled),
+    permissions: normalizePermissions(normalizedUser.permissions),
+    updatedAt: normalizedUser.updatedAt,
   };
 }
 
@@ -224,12 +253,28 @@ export async function updateUser(userId, patch) {
   }
 
   const current = normalizeUser(users[index]);
+  const isLockedAdmin = current.role === 'admin';
   const next = normalizeUser({
     ...current,
-    enabled: typeof patch?.enabled === 'boolean' ? patch.enabled : current.enabled,
-    permissions: patch?.permissions ? normalizePermissions(patch.permissions) : current.permissions,
-    displayName: typeof patch?.displayName === 'string' ? patch.displayName : current.displayName,
-    role: patch?.role === 'admin' ? 'admin' : patch?.role === 'picker' ? 'picker' : current.role,
+    enabled:
+      isLockedAdmin || typeof patch?.enabled !== 'boolean' ? current.enabled : patch.enabled,
+    permissions: isLockedAdmin
+      ? current.permissions
+      : patch?.permissions
+        ? normalizePermissions(patch.permissions)
+        : current.permissions,
+    displayName:
+      isLockedAdmin || typeof patch?.displayName !== 'string'
+        ? current.displayName
+        : patch.displayName,
+    role:
+      isLockedAdmin
+        ? current.role
+        : patch?.role === 'admin'
+          ? 'admin'
+          : patch?.role === 'picker'
+            ? 'picker'
+            : current.role,
     updatedAt: new Date().toISOString(),
   });
 
@@ -250,4 +295,3 @@ export async function updateUser(userId, patch) {
 
   return sanitizeUser(next);
 }
-

@@ -1,4 +1,6 @@
 import { verifyAuthToken } from './auth-token.js';
+import { getUserById } from './user-store.js';
+import { gunzipSync, strFromU8 } from 'fflate';
 
 export function applyCors(response) {
   response.setHeader('Access-Control-Allow-Origin', '*');
@@ -35,7 +37,7 @@ export function readBearerToken(request) {
   return authorizationHeader.slice('Bearer '.length).trim();
 }
 
-export function requireAuth(request, response) {
+export async function requireAuth(request, response) {
   const token = readBearerToken(request);
 
   if (!token) {
@@ -50,41 +52,56 @@ export function requireAuth(request, response) {
     return null;
   }
 
-  return payload;
+  const freshUser = await getUserById(payload.user?.id);
+
+  if (!freshUser || freshUser.enabled === false) {
+    sendJson(response, 401, { error: 'Session expired.' });
+    return null;
+  }
+
+  return {
+    ...payload,
+    user: freshUser,
+  };
 }
 
 export async function parseRequestBody(request) {
-  if (!request.body) {
-    return {};
-  }
-
-  if (typeof request.body === 'object') {
-    return request.body;
-  }
-
-  if (typeof request.body === 'string') {
+  let parsed = {};
+  
+  if (request.body) {
+    if (typeof request.body === 'object') {
+      parsed = request.body;
+    } else if (typeof request.body === 'string') {
+      try {
+        parsed = JSON.parse(request.body);
+      } catch {
+        parsed = {};
+      }
+    }
+  } else {
     try {
-      return JSON.parse(request.body);
+      const chunks = [];
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const raw = Buffer.concat(chunks).toString('utf8');
+      parsed = raw ? JSON.parse(raw) : {};
     } catch {
-      return {};
+      parsed = {};
     }
   }
 
-  try {
-    const chunks = [];
-
-    for await (const chunk of request) {
-      chunks.push(chunk);
+  // Handle compressed payload
+  if (parsed?._compressed && typeof parsed.data === 'string') {
+    try {
+      const buf = Buffer.from(parsed.data, 'base64');
+      const decompressed = gunzipSync(new Uint8Array(buf));
+      return JSON.parse(strFromU8(decompressed));
+    } catch (err) {
+      console.error('Failed to decompress body:', err.message);
+      return parsed;
     }
-
-    const raw = Buffer.concat(chunks).toString('utf8');
-
-    if (!raw) {
-      return {};
-    }
-
-    return JSON.parse(raw);
-  } catch {
-    return {};
   }
+
+  return parsed;
 }

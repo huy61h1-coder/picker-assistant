@@ -11,7 +11,7 @@ export default async function handler(request, response) {
     return;
   }
 
-  const auth = requireAuth(request, response);
+  const auth = await requireAuth(request, response);
 
   if (!auth) {
     return;

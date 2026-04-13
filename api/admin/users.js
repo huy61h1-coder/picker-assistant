@@ -1,8 +1,8 @@
 import { handleOptions, parseRequestBody, requireAuth, sendJson } from '../_lib/http.js';
 import { createUser, getSanitizedUsers, updateUser } from '../_lib/user-store.js';
 
-function requireAdmin(request, response) {
-  const auth = requireAuth(request, response);
+async function requireAdmin(request, response) {
+  const auth = await requireAuth(request, response);
   if (!auth) return null;
 
   const role = auth.user?.role;
@@ -22,7 +22,7 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'GET') {
-    const auth = requireAdmin(request, response);
+    const auth = await requireAdmin(request, response);
     if (!auth) return;
 
     try {
@@ -35,7 +35,7 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'POST') {
-    const auth = requireAdmin(request, response);
+    const auth = await requireAdmin(request, response);
     if (!auth) return;
 
     try {
@@ -50,7 +50,7 @@ export default async function handler(request, response) {
   }
 
   if (request.method === 'PATCH') {
-    const auth = requireAdmin(request, response);
+    const auth = await requireAdmin(request, response);
     if (!auth) return;
 
     try {
@@ -74,4 +74,3 @@ export default async function handler(request, response) {
 
   sendJson(response, 405, { error: 'Method not allowed.' });
 }
-

@@ -37,8 +37,10 @@ export function getInitialState() {
       ],
     },
     aisleVisuals: {},
+    aisleNames: {},
     lossAudits: [],
     stockChecks: [],
+    masterProducts: [],
     updatedAt: new Date().toISOString(),
   };
 }

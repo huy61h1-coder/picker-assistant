@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Barcode,
@@ -28,11 +28,16 @@ import {
   UserPlus,
   Users,
   ShieldCheck,
+  Key,
   X,
   Moon,
   Sun,
+  ChevronLeft,
+  ChevronRight,
+  Loader,
+  UploadCloud,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+
 import { translations, FONT_OPTIONS } from './translations';
 import { MAIN_AISLES, SECONDARY_AISLES, STORAGE_KEY } from './data';
 import {
@@ -74,16 +79,19 @@ function normaliseLọcIdValue(value) {
     .toLowerCase();
 }
 
-function getProductSearchableText(product) {
+function getProductSearchableText(product, masterName = '') {
   const sku = String(product?.sku || '')
     .replace(/\s/g, '')
     .trim();
   const barcode = String(product?.barcode || product?.productId || product?.ean || '')
     .replace(/\s/g, '')
     .trim();
+  const productId = String(product?.productId || product?.barcode || product?.ean || '')
+    .replace(/\s/g, '')
+    .trim();
 
   return normaliseSearchText(
-    `${product?.name || ''} ${product?.locId || ''} ${sku} ${barcode}`,
+    `${masterName || product?.name || ''} ${product?.locId || ''} ${sku} ${barcode} ${productId}`,
   );
 }
 
@@ -92,6 +100,261 @@ function normaliseProductCode(value) {
     .replace(/\s/g, '')
     .trim()
     .toLowerCase();
+}
+
+const MASTER_IMPORT_FIELD_MATCHERS = {
+  name: [/ten.*sp/, /ten.*hang/, /prod.*name/, /item.*name/, /desc/, /mo ?ta/, /hoten/, /acc.*name/, /dien.*giai/, /ten/, /sp/, /thietbi/],
+  barcode: [/barcode/, /ma.*vach/, /ean/, /upc/, /qr/, /scan/, /aeon/, /item.*id/, /art.*id/, /sap/, /internal.*id/, /id/, /uuid/, /gtin/, /prod.*id/, /serial/],
+  sku: [/item.*code/, /item.*no/, /prod.*code/, /ma.*sp/, /ma.*hang/, /thanh.*pham/, /part.*no/, /material/, /vattu/, /sku/, /code/, /ma/],
+  division: [/div.*cd/, /ma.*div/, /ma.*nganh/, /div.*id/, /dept.*cd/, /madiv/, /manganh/, /div/, /nganh/],
+  divisionName: [/div.*name/, /ten.*div/, /ten.*nganh/, /div.*desc/, /nganh.*hang/, /category/, /cat/],
+  department: [/dept.*cd/, /ma.*dept/, /ma.*nhom/, /sub.*dept.*cd/, /madept/, /manhom/, /dept/, /nhom/],
+  departmentName: [/dept.*name/, /ten.*dept/, /ten.*nhom/, /sub.*desc/, /nhom.*hang/, /department/, /subcat/],
+};
+
+function cleanMasterText(value) {
+  return String(value || '')
+    .replace(/\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanMasterCode(value) {
+  return String(value || '')
+    .replace(/\s/g, '')
+    .trim();
+}
+
+function buildMasterLookupKeys(product) {
+  return Array.from(
+    new Set(
+      [
+        normaliseProductCode(product?.sku),
+        normaliseProductCode(product?.barcode || product?.ean),
+        normaliseProductCode(product?.productId || product?.articleId || product?.itemId),
+      ].filter(Boolean),
+    ),
+  );
+}
+
+function normaliseMasterProduct(product) {
+  const sku = cleanMasterCode(
+    product?.sku || product?.itemCode || product?.itemNo || product?.productCode || product?.code,
+  );
+  const barcode = cleanMasterCode(
+    product?.barcode || product?.barCode || product?.ean || product?.upc || product?.qr ||
+    product?.productId || product?.itemId || product?.articleId || product?.aeonCode || product?.internalId
+  );
+  
+  const primaryCode = sku || barcode;
+  const name = cleanMasterText(product?.name || product?.productName || product?.description);
+
+  const division = cleanMasterText(product?.division || product?.divisionCd || product?.madivision || product?.manganh);
+  const divisionName = cleanMasterText(product?.divisionName || product?.tendivision || product?.tennganh);
+  const department = cleanMasterText(product?.department || product?.departmentCd || product?.madepartment || product?.manhom);
+  const departmentName = cleanMasterText(product?.departmentName || product?.tendepartment || product?.tennhom);
+
+  if (!primaryCode) {
+    return null;
+  }
+
+  return {
+    sku: sku || primaryCode,
+    barcode: barcode || sku || primaryCode,
+    name,
+    division,
+    divisionName,
+    department,
+    departmentName,
+  };
+}
+
+function pickPreferredMasterText(currentValue, nextValue) {
+  const currentText = cleanMasterText(currentValue);
+  const nextText = cleanMasterText(nextValue);
+
+  if (!currentText) {
+    return nextText;
+  }
+
+  if (!nextText) {
+    return currentText;
+  }
+
+  return nextText.length > currentText.length ? nextText : currentText;
+}
+
+function pickPreferredMasterCode(currentValue, nextValue) {
+  const currentCode = cleanMasterCode(currentValue);
+  const nextCode = cleanMasterCode(nextValue);
+
+  if (!currentCode) {
+    return nextCode;
+  }
+
+  if (!nextCode) {
+    return currentCode;
+  }
+
+  return nextCode.length > currentCode.length ? nextCode : currentCode;
+}
+
+function mergeMasterProductEntries(currentProduct, nextProduct) {
+  return normaliseMasterProduct({
+    sku: pickPreferredMasterCode(currentProduct?.sku, nextProduct?.sku),
+    barcode: pickPreferredMasterCode(currentProduct?.barcode, nextProduct?.barcode),
+    name: pickPreferredMasterText(currentProduct?.name, nextProduct?.name),
+    division: pickPreferredMasterCode(currentProduct?.division, nextProduct?.division),
+    divisionName: pickPreferredMasterText(currentProduct?.divisionName, nextProduct?.divisionName),
+    department: pickPreferredMasterCode(currentProduct?.department, nextProduct?.department),
+    departmentName: pickPreferredMasterText(currentProduct?.departmentName, nextProduct?.departmentName),
+  });
+}
+
+function dedupeMasterProducts(products) {
+  if (!products || products.length === 0) return [];
+  
+  const mergedProducts = [];
+  const keyToIndex = new Map();
+
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i];
+    const normalizedProduct = normaliseMasterProduct(product);
+    if (!normalizedProduct) continue;
+
+    const skuKey = normaliseProductCode(normalizedProduct.sku);
+    const barcodeKey = normaliseProductCode(normalizedProduct.barcode);
+    
+    let matchedIndex = -1;
+    if (skuKey && keyToIndex.has(skuKey)) {
+        matchedIndex = keyToIndex.get(skuKey);
+    } else if (barcodeKey && keyToIndex.has(barcodeKey)) {
+        matchedIndex = keyToIndex.get(barcodeKey);
+    }
+
+    if (matchedIndex !== -1) {
+      mergedProducts[matchedIndex] = mergeMasterProductEntries(
+        mergedProducts[matchedIndex],
+        normalizedProduct,
+      );
+      // Ensure both keys are mapped to this index
+      if (skuKey) keyToIndex.set(skuKey, matchedIndex);
+      if (barcodeKey) keyToIndex.set(barcodeKey, matchedIndex);
+    } else {
+      const nextIndex = mergedProducts.push(normalizedProduct) - 1;
+      if (skuKey) keyToIndex.set(skuKey, nextIndex);
+      if (barcodeKey) keyToIndex.set(barcodeKey, nextIndex);
+    }
+  }
+
+  // Remove the expensive sort on 50k items. 
+  // We can sort by name once if needed, but for bulk import it's better to stay fast.
+  // If we really want it sorted, use a simpler sort that doesn't normalise every time.
+  return mergedProducts;
+}
+
+function normaliseMasterHeader(value) {
+  return normaliseSearchText(value);
+}
+
+function detectMasterFieldType(headerValue) {
+  const normalizedHeader = normaliseMasterHeader(headerValue);
+
+  if (!normalizedHeader) {
+    return '';
+  }
+
+  const fieldOrder = ['name', 'barcode', 'sku', 'divisionName', 'division', 'departmentName', 'department'];
+  const matchedField = fieldOrder.find((field) => {
+    return MASTER_IMPORT_FIELD_MATCHERS[field].some((pattern) => pattern.test(normalizedHeader));
+  });
+
+  return matchedField || '';
+}
+
+function detectMasterHeaderConfig(rows) {
+  let bestConfig = null;
+  const scanLimit = Math.min(rows.length, 300);
+
+  for (let rowIndex = 0; rowIndex < scanLimit; rowIndex += 1) {
+    const row = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
+    if (row.length < 2) continue;
+
+    const columns = {};
+    row.forEach((cellValue, cellIndex) => {
+      const fieldType = detectMasterFieldType(cellValue);
+      if (fieldType && !Number.isInteger(columns[fieldType])) {
+        columns[fieldType] = cellIndex;
+      }
+    });
+
+    const matchedFields = Object.keys(columns);
+    const hasCodeColumn = ['sku', 'barcode', 'productId'].some((field) => Number.isInteger(columns[field]));
+
+    if (!hasCodeColumn || matchedFields.length < 2) {
+      continue;
+    }
+
+    const score = matchedFields.length * 2 + (matchedFields.includes('sku') && matchedFields.includes('barcode') ? 2 : 0);
+
+    if (!bestConfig || score > bestConfig.score) {
+      bestConfig = {
+        headerRowIndex: rowIndex,
+        columns,
+        score,
+      };
+    }
+    
+    if (score >= 10) break;
+  }
+
+  return bestConfig;
+}
+
+function extractMasterProductsFromWorkbook(workbook, XLSX) {
+  const collectedProducts = [];
+  let detectedColumnsInfo = '';
+
+  (workbook?.SheetNames || []).forEach((sheetName) => {
+    const worksheet = workbook?.Sheets?.[sheetName];
+    if (!worksheet) return;
+
+    const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
+    const headerConfig = detectMasterHeaderConfig(rows);
+
+    if (!headerConfig) return;
+
+    const foundFields = Object.keys(headerConfig.columns);
+    console.log(`[Import] Found headers in "${sheetName}":`, foundFields);
+    
+    if (!detectedColumnsInfo) {
+       detectedColumnsInfo = `Các cột tìm thấy: ${foundFields.join(', ')}`;
+    }
+
+    rows.slice(headerConfig.headerRowIndex + 1).forEach((row) => {
+      const safeRow = Array.isArray(row) ? row : [];
+      if (safeRow.length === 0) return;
+
+      const normalizedProduct = normaliseMasterProduct({
+        sku: Number.isInteger(headerConfig.columns.sku) ? safeRow[headerConfig.columns.sku] : '',
+        barcode: Number.isInteger(headerConfig.columns.barcode) ? safeRow[headerConfig.columns.barcode] : '',
+        name: Number.isInteger(headerConfig.columns.name) ? safeRow[headerConfig.columns.name] : '',
+        division: Number.isInteger(headerConfig.columns.division) ? safeRow[headerConfig.columns.division] : '',
+        divisionName: Number.isInteger(headerConfig.columns.divisionName) ? safeRow[headerConfig.columns.divisionName] : '',
+        department: Number.isInteger(headerConfig.columns.department) ? safeRow[headerConfig.columns.department] : '',
+        departmentName: Number.isInteger(headerConfig.columns.departmentName) ? safeRow[headerConfig.columns.departmentName] : '',
+      });
+
+      if (normalizedProduct) {
+        collectedProducts.push(normalizedProduct);
+      }
+    });
+  });
+
+  return { 
+    products: dedupeMasterProducts(collectedProducts),
+    info: detectedColumnsInfo 
+  };
 }
 
 function makeLossPeriodLabel(date = new Date()) {
@@ -136,6 +399,48 @@ function getCountValue(value) {
 
 function computeLossValue(systemStock, actualStock) {
   return Math.max(0, getCountValue(systemStock) - getCountValue(actualStock));
+}
+
+function fetchJsonWithTimeout(url, options = {}, timeoutMs = 300000) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, {
+    ...options,
+    signal: controller.signal,
+  }).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
+}
+
+function mergeVisualCache(existingCache, incomingVisualMeta) {
+  const currentCache = existingCache && typeof existingCache === 'object' ? existingCache : {};
+  const nextMeta = incomingVisualMeta && typeof incomingVisualMeta === 'object' ? incomingVisualMeta : {};
+  const merged = {};
+
+  Object.entries(nextMeta).forEach(([key, value]) => {
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+
+    const cachedVisual = currentCache[key];
+    const incomingUpdatedAt = String(value.updatedAt || '');
+    const cachedUpdatedAt = String(cachedVisual?.updatedAt || '');
+    const canReuseCachedSource = Boolean(
+      cachedVisual?.src &&
+        (!incomingUpdatedAt || !cachedUpdatedAt || incomingUpdatedAt === cachedUpdatedAt),
+    );
+
+    merged[key] = canReuseCachedSource
+      ? {
+          ...value,
+          ...cachedVisual,
+          hasSource: true,
+        }
+      : value;
+  });
+
+  return merged;
 }
 
 function triggerBarcodeScanFeedback() {
@@ -411,8 +716,19 @@ function PlanogramPreview({
 export default function App() {
   const [aisleProducts, setAisleProducts] = useState({});
   const [aisleVisuals, setAisleVisuals] = useState({});
+  const [aisleNames, setAisleNames] = useState({});
   const [lossAudits, setLossAudits] = useState([]);
+  const [masterProducts, setMasterProducts] = useState([]);
+  const [showMasterModal, setShowMasterModal] = useState(false);
+  const [masterSearchTerm, setMasterSearchTerm] = useState('');
+  const [masterSearchInput, setMasterSearchInput] = useState('');
+  const [masterPage, setMasterPage] = useState(1);
+  const ITEMS_PER_MASTER_PAGE = 100;
+  const [isImportingMaster, setIsImportingMaster] = useState(false);
+  const [isExportingMaster, setIsExportingMaster] = useState(false);
+  const masterImportRef = useRef(null);
   const [isSharedLoading, setIsSharedLoading] = useState(true);
+  const [loadingVisualKey, setLoadingVisualKey] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
   const [language, setLanguage] = useState(() => localStorage.getItem('lang') || 'vi');
   const [selectedFont, setSelectedFont] = useState(() => localStorage.getItem('appFont') || 'Nunito');
@@ -454,15 +770,21 @@ export default function App() {
   const [mobileMapSection, setMobileMapSection] = useState('main');
   const [selectedId, setSelectedId] = useState('L12-A');
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [focusedLọcId, setFocusedLọcId] = useState(null);
   const [lossSearchTerm, setLossSearchTerm] = useState('');
+  const [lossSearchInput, setLossSearchInput] = useState('');
   const [lossBarcodeInput, setLossBarcodeInput] = useState('');
   const [checkStockSearchTerm, setCheckStockSearchTerm] = useState('');
+  const [checkStockSearchInput, setCheckStockSearchInput] = useState('');
   const [checkStockBarcodeInput, setCheckStockBarcodeInput] = useState('');
   const [lossPeriodName, setLossPeriodName] = useState(() => makeLossPeriodLabel());
   const [lossDraftItems, setLossDraftItems] = useState([]);
   const [isSavingLossAudit, setIsSavingLossAudit] = useState(false);
   const [isExportingLossFile, setIsExportingLossFile] = useState(false);
+  const [isExportingStockFile, setIsExportingStockFile] = useState(false);
+  const [isImportingStockFile, setIsImportingStockFile] = useState(false);
+  const stockImportInputRef = useRef(null);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [isScannerStarting, setIsScannerStarting] = useState(false);
   const [scannerError, setScannerError] = useState('');
@@ -491,6 +813,9 @@ export default function App() {
   const [extractedData, setExtractedData] = useState([]);
   const [extractedVisual, setExtractedVisual] = useState(null);
   const [uploadFile, setUploadFile] = useState(null);
+  const [tempAisleName, setTempAisleName] = useState('');
+  const [isRenamingAisle, setIsRenamingAisle] = useState(false);
+  const [highlightedCategory, setHighlightedCategory] = useState(null);
   const scannerVideoRef = useRef(null);
   const scannerControlsRef = useRef(null);
   const scannerReaderRef = useRef(null);
@@ -498,6 +823,38 @@ export default function App() {
   const scannerFrameRef = useRef(0);
   const scannerTimeoutRef = useRef(0);
   const lastScannedBarcodeRef = useRef('');
+
+  const filteredMasterProducts = useMemo(() => {
+    if (!masterSearchTerm) return masterProducts;
+    const term = normaliseSearchText(masterSearchTerm);
+    return masterProducts.filter(p => 
+      normaliseSearchText(p.sku).includes(term) ||
+      normaliseSearchText(p.barcode).includes(term) ||
+      normaliseSearchText(p.name).includes(term) ||
+      normaliseSearchText(p.division || '').includes(term) ||
+      normaliseSearchText(p.department || '').includes(term)
+    );
+  }, [masterProducts, masterSearchTerm]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(searchInput), 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMasterSearchTerm(masterSearchInput), 500);
+    return () => clearTimeout(timer);
+  }, [masterSearchInput]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLossSearchTerm(lossSearchInput), 500);
+    return () => clearTimeout(timer);
+  }, [lossSearchInput]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setCheckStockSearchTerm(checkStockSearchInput), 500);
+    return () => clearTimeout(timer);
+  }, [checkStockSearchInput]);
   const scannerFeedbackAudioContextRef = useRef(null);
   const [desktopDrawerWidth, setDesktopDrawerWidth] = useState(() => {
     const preferredWidth = Math.round(window.innerWidth * 0.38);
@@ -505,14 +862,90 @@ export default function App() {
   });
   const [isDesktopResizing, setIsDesktopResizing] = useState(false);
 
-  const allLines = useMemo(() => [...MAIN_AISLES, ...SECONDARY_AISLES], []);
+  const allLines = useMemo(() => {
+    const main = MAIN_AISLES.map((aisle) => ({
+      ...aisle,
+      name: aisleNames[aisle.id] || aisle.name,
+    }));
+    const secondary = SECONDARY_AISLES.map((aisle) => ({
+      ...aisle,
+      name: aisleNames[aisle.id] || aisle.name,
+    }));
+    return [...main, ...secondary];
+  }, [aisleNames]);
+
+  const groupedMainAisles = useMemo(() => {
+    const main = allLines.filter((a) => MAIN_AISLES.some((m) => m.id === a.id));
+    const groups = {};
+    main.forEach((aisle) => {
+      const cat = aisle.cat || 'Khác';
+      if (!groups[cat]) {
+        groups[cat] = [];
+      }
+      groups[cat].push(aisle);
+    });
+    return groups;
+  }, [allLines]);
+
+  const groupedSecondaryAisles = useMemo(() => {
+    const secondary = allLines.filter((a) => SECONDARY_AISLES.some((s) => s.id === a.id));
+    const groups = {};
+    secondary.forEach((aisle) => {
+      const cat = aisle.cat || 'Khác';
+      if (!groups[cat]) {
+        groups[cat] = [];
+      }
+      groups[cat].push(aisle);
+    });
+    return groups;
+  }, [allLines]);
+
+  const masterLookup = useMemo(() => {
+    const map = new Map();
+    (masterProducts || []).forEach((product) => {
+      const normalizedProduct = normaliseMasterProduct(product);
+
+      if (!normalizedProduct) {
+        return;
+      }
+
+      buildMasterLookupKeys(normalizedProduct).forEach((key) => {
+        map.set(key, normalizedProduct);
+      });
+    });
+    return map;
+  }, [masterProducts]);
+
+  const resolveProductName = useCallback((product) => {
+    if (!product) return '';
+
+    const masterMatch = buildMasterLookupKeys(product)
+      .map((key) => masterLookup.get(key))
+      .find(Boolean);
+
+    if (masterMatch && masterMatch.name) {
+      return masterMatch.name;
+    }
+    return product.name || '';
+  }, [masterLookup]);
+
   const searchKeyword = useMemo(() => normaliseSearchText(searchTerm), [searchTerm]);
   const lossSearchKeyword = useMemo(() => normaliseSearchText(lossSearchTerm), [lossSearchTerm]);
   const userLabel = authUser?.displayName || authUser?.username || 'Tài khoản';
   const isReadOnly = !authUser;
+  const authPermissions = authUser?.permissions || {};
+  const isAdminAccount = authUser?.role === 'admin';
+  const canEditPog = Boolean(authUser && (isAdminAccount || authPermissions.pog !== false));
+  const canUseLossTools = Boolean(authUser && (isAdminAccount || authPermissions.loss !== false));
+  const canUseStockTools = Boolean(authUser && (isAdminAccount || authPermissions.stock !== false));
+  const canManageAccounts = Boolean(authUser && (isAdminAccount || authPermissions.adminUsers === true));
 
   // Translation helper
   const t = (key) => translations[language]?.[key] ?? translations['vi']?.[key] ?? key;
+  const manageAccountsLabel = language === 'en' ? 'Manage Accounts' : 'Quản lý tài khoản';
+  const accountsTabLabel = language === 'en' ? 'Accounts' : 'Tài khoản';
+  const createAccountLabel = language === 'en' ? 'Create account' : 'Tạo tài khoản';
+  const accountListLabel = language === 'en' ? 'Account list' : 'Danh sách tài khoản';
 
   const topbarSearchValue = activeModule === 'pog' 
     ? searchTerm 
@@ -613,11 +1046,14 @@ export default function App() {
       ...shelf,
       side,
       data: {
-        products: aisleProducts[selectedId] || [],
+        products: (aisleProducts[selectedId] || []).map(p => ({
+          ...p,
+          displayName: resolveProductName(p)
+        })),
         visual: aisleVisuals[selectedId] || null,
       },
     };
-  }, [aisleProducts, aisleVisuals, allLines, selectedId]);
+  }, [aisleProducts, aisleVisuals, allLines, resolveProductName, selectedId]);
 
   const globalMatches = useMemo(() => {
     if (!searchKeyword) {
@@ -627,14 +1063,14 @@ export default function App() {
     return Object.entries(aisleProducts).flatMap(([lineKey, products]) =>
       (products || [])
         .filter((product) => {
-          return getProductSearchableText(product).includes(searchKeyword);
+          return getProductSearchableText(product, resolveProductName(product)).includes(searchKeyword);
         })
         .map((product) => ({
           lineKey,
           product,
         })),
     );
-  }, [aisleProducts, searchKeyword]);
+  }, [aisleProducts, resolveProductName, searchKeyword]);
 
   const matchedProducts = useMemo(() => {
     if (!selectedShelf || !searchKeyword) {
@@ -642,7 +1078,7 @@ export default function App() {
     }
 
     return selectedShelf.data.products.filter((product) => {
-      return getProductSearchableText(product).includes(searchKeyword);
+      return getProductSearchableText(product, product.displayName).includes(searchKeyword);
     });
   }, [searchKeyword, selectedShelf]);
 
@@ -659,7 +1095,7 @@ export default function App() {
     const unmatched = [];
 
     selectedShelf.data.products.forEach((product) => {
-      if (getProductSearchableText(product).includes(searchKeyword)) {
+      if (getProductSearchableText(product, product.displayName).includes(searchKeyword)) {
         matched.push(product);
       } else {
         unmatched.push(product);
@@ -723,35 +1159,54 @@ export default function App() {
   const productCodeLookup = useMemo(() => {
     const lookup = new Map();
 
+    (masterProducts || []).forEach((product) => {
+      const normalizedProduct = normaliseMasterProduct(product);
+
+      if (!normalizedProduct) {
+        return;
+      }
+
+      const entry = {
+        lineKey: '',
+        locId: '',
+        name: normalizedProduct.name,
+        sku: normalizedProduct.sku,
+        barcode: normalizedProduct.barcode,
+        productId: normalizedProduct.productId,
+        stockStatus: 'unchecked',
+      };
+
+      buildMasterLookupKeys(normalizedProduct).forEach((code) => {
+        lookup.set(code, entry);
+      });
+    });
+
     Object.entries(aisleProducts).forEach(([lineKey, products]) => {
       (products || []).forEach((product) => {
-        const sku = normaliseProductCode(product?.sku);
-        const barcode = normaliseProductCode(
-          product?.barcode || product?.productId || product?.ean || product?.sku,
-        );
-        const productId = normaliseProductCode(
-          product?.productId || product?.barcode || product?.ean || product?.sku,
-        );
+        const normalizedProduct = normaliseMasterProduct(product);
+
+        if (!normalizedProduct) {
+          return;
+        }
+
         const entry = {
           lineKey,
           locId: product?.locId,
-          name: String(product?.name || ''),
-          sku: String(product?.sku || barcode || productId || ''),
-          barcode: String(product?.barcode || product?.productId || product?.ean || product?.sku || ''),
-          productId: String(product?.productId || product?.barcode || product?.ean || product?.sku || ''),
+          name: resolveProductName(product),
+          sku: normalizedProduct.sku,
+          barcode: normalizedProduct.barcode,
+          productId: normalizedProduct.productId,
           stockStatus: getStockMeta(product?.stockStatus).id,
         };
 
-        [sku, barcode, productId].forEach((code) => {
-          if (code && !lookup.has(code)) {
-            lookup.set(code, entry);
-          }
+        buildMasterLookupKeys(normalizedProduct).forEach((code) => {
+          lookup.set(code, entry);
         });
       });
     });
 
     return lookup;
-  }, [aisleProducts]);
+  }, [aisleProducts, masterProducts, resolveProductName]);
 
   const allStockProducts = useMemo(() => {
     const productsList = [];
@@ -759,6 +1214,7 @@ export default function App() {
       (products || []).forEach((product) => {
         const sku = String(product?.sku || '').trim();
         const barcode = String(product?.barcode || product?.productId || product?.sku || '').trim();
+        const displayName = resolveProductName(product);
         
         const matchingDraft = lossDraftItems.find(
           (item) =>
@@ -770,30 +1226,34 @@ export default function App() {
         
         productsList.push({
           ...product,
+          name: displayName || product?.name || '',
           lineKey,
           barcodeView: barcode,
-          actualStockFromLoss
+          actualStockFromLoss,
+          displayName,
         });
       });
     });
 
     productsList.sort((a, b) => {
-      const nameA = String(a.name || '').toLowerCase();
-      const nameB = String(b.name || '').toLowerCase();
+      const nameA = String(a.displayName || a.name || '').toLowerCase();
+      const nameB = String(b.displayName || b.name || '').toLowerCase();
       if (nameA < nameB) return -1;
       if (nameA > nameB) return 1;
       return 0;
     });
 
     return productsList;
-  }, [aisleProducts, lossDraftItems]);
+  }, [aisleProducts, lossDraftItems, resolveProductName]);
 
   const filteredStockProducts = useMemo(() => {
     const keyword = normaliseSearchText(checkStockSearchTerm);
     if (!keyword) return allStockProducts;
     
     return allStockProducts.filter((product) => {
-      const text = normaliseSearchText(`${product.sku} ${product.barcodeView} ${product.name}`);
+      const text = normaliseSearchText(
+        `${product.sku} ${product.barcodeView} ${product.productId || ''} ${product.displayName || product.name || ''}`,
+      );
       return text.includes(keyword);
     });
   }, [allStockProducts, checkStockSearchTerm]);
@@ -1018,7 +1478,7 @@ export default function App() {
             }
           : undefined;
 
-        const response = await fetch('/api/state', {
+        const response = await fetchJsonWithTimeout('/api/state', {
           cache: 'no-store',
           headers,
         });
@@ -1056,12 +1516,25 @@ export default function App() {
             ? sharedState.aisleProducts
             : {},
         );
-        setAisleVisuals(
-          sharedState?.aisleVisuals && typeof sharedState.aisleVisuals === 'object'
-            ? sharedState.aisleVisuals
+        setAisleVisuals((current) =>
+          mergeVisualCache(
+            current,
+            sharedState?.aisleVisuals && typeof sharedState.aisleVisuals === 'object'
+              ? sharedState.aisleVisuals
+              : {},
+          ),
+        );
+        setAisleNames(
+          sharedState?.aisleNames && typeof sharedState.aisleNames === 'object'
+            ? sharedState.aisleNames
             : {},
         );
         setLossAudits(Array.isArray(sharedState?.lossAudits) ? sharedState.lossAudits : []);
+        setMasterProducts(
+          Array.isArray(sharedState?.masterProducts)
+            ? dedupeMasterProducts(sharedState.masterProducts)
+            : [],
+        );
       } catch (error) {
         if (!active || silent) {
           return;
@@ -1083,6 +1556,94 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [authToken]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setLoadingVisualKey('');
+      return undefined;
+    }
+
+    const selectedVisual = aisleVisuals[selectedId];
+
+    if (!selectedVisual?.hasSource || selectedVisual?.src) {
+      setLoadingVisualKey((current) => (current === selectedId ? '' : current));
+      return undefined;
+    }
+
+    let active = true;
+    const headers = authToken
+      ? {
+          Authorization: `Bearer ${authToken}`,
+        }
+      : undefined;
+
+    setLoadingVisualKey(selectedId);
+
+    fetchJsonWithTimeout(`/api/visual?key=${encodeURIComponent(selectedId)}`, {
+      cache: 'no-store',
+      headers,
+    })
+      .then(async (response) => {
+        if (response.status === 404) {
+          return null;
+        }
+
+        if (!response.ok) {
+          throw new Error(`Khong tai duoc anh line (${response.status}).`);
+        }
+
+        const payload = await response.json();
+        return payload?.visual || null;
+      })
+      .then((visual) => {
+        if (!active) {
+          return;
+        }
+
+        setAisleVisuals((current) => {
+          const currentEntry = current[selectedId];
+
+          if (!currentEntry) {
+            return current;
+          }
+
+          if (!visual?.src) {
+            return {
+              ...current,
+              [selectedId]: {
+                ...currentEntry,
+                hasSource: false,
+              },
+            };
+          }
+
+          return {
+            ...current,
+            [selectedId]: {
+              ...currentEntry,
+              ...visual,
+              hasSource: true,
+            },
+          };
+        });
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+
+        setToast(buildToast('error', error.message || 'Khong tai duoc anh line.'));
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingVisualKey((current) => (current === selectedId ? '' : current));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [aisleVisuals, authToken, selectedId]);
 
   useEffect(() => {
     if (matchedProducts.length === 0) {
@@ -1152,7 +1713,7 @@ export default function App() {
     window.addEventListener('pointerup', handlePointerUp, { once: true });
   }
 
-  const downloadPogData = (lineKey) => {
+  const downloadPogData = async (lineKey) => {
     const data = aisleProducts[lineKey] || [];
     if (!data.length) {
       setToast(buildToast('error', t('errNoDataToDownload')));
@@ -1164,21 +1725,26 @@ export default function App() {
       'Loc ID': item.locId,
       'SKU': item.sku,
       'Barcode': item.barcode || item.sku,
-      'Product Name': item.name
+      'Product Name': resolveProductName(item)
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'POG Data');
-    
-    // Tạo width cho từng cột
-    const columnWidths = [
-      { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 60 }
-    ];
-    worksheet['!cols'] = columnWidths;
+    try {
+      const XLSX = await import('xlsx');
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'POG Data');
+      
+      // Tạo width cho từng cột
+      const columnWidths = [
+        { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 60 }
+      ];
+      worksheet['!cols'] = columnWidths;
 
-    XLSX.writeFile(workbook, `POG_${lineKey}_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    setToast(buildToast('success', t('successDownloadPog', lineKey)));
+      XLSX.writeFile(workbook, `POG_${lineKey}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      setToast(buildToast('success', t('successDownloadPog', lineKey)));
+    } catch (error) {
+      setToast(buildToast('error', error.message || 'Lỗi xuất file Excel.'));
+    }
   };
 
   const deletePogData = (lineKey) => {
@@ -1200,10 +1766,30 @@ export default function App() {
     setToast(buildToast('success', t('successDeletePog', lineKey)));
   };
 
-  function openSyncModal() {
-    if (isReadOnly) {
+  function requireFeatureAccess(isAllowed, moduleKey = 'pog') {
+    if (isAllowed) {
+      return true;
+    }
+
+    if (!authUser) {
       setShowLoginModal(true);
       setToast(buildToast('error', t('errLoginRequired')));
+      return false;
+    }
+
+    const moduleLabel =
+      moduleKey === 'stock'
+        ? t('moduleStock')
+        : moduleKey === 'loss'
+          ? t('moduleLoss')
+          : 'POG';
+
+    setToast(buildToast('error', `Tai khoan nay chua duoc cap quyen ${moduleLabel}.`));
+    return false;
+  }
+
+  function openSyncModal() {
+    if (!requireFeatureAccess(canEditPog, 'pog')) {
       return;
     }
 
@@ -1218,7 +1804,7 @@ export default function App() {
 
   async function authLogin(username, password) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
       const response = await fetch('/api/auth/login', {
@@ -1243,6 +1829,44 @@ export default function App() {
       throw error;
     } finally {
       clearTimeout(timeoutId);
+    }
+  }
+
+  async function handleRenameAisle(aisleId, nextName) {
+    if (!requireFeatureAccess(isAdminAccount, 'admin')) {
+      return;
+    }
+
+    const trimmed = String(nextName || '').trim();
+    if (!trimmed) {
+      setToast(buildToast('error', 'Tên line không được để trống.'));
+      return;
+    }
+
+    try {
+      const nextAisleNames = {
+        ...aisleNames,
+        [aisleId]: trimmed,
+      };
+
+      const response = await fetch('/api/state', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ aisleNames: nextAisleNames }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Lỗi cập nhật tên line (${response.status})`);
+      }
+
+      setAisleNames(nextAisleNames);
+      setIsRenamingAisle(false);
+      setToast(buildToast('success', `Đã đổi tên line thành "${trimmed}".`));
+    } catch (error) {
+      setToast(buildToast('error', error.message || 'Không thể đổi tên line.'));
     }
   }
 
@@ -1332,6 +1956,9 @@ export default function App() {
       }
       const data = await response.json();
       setUsersList(data.users);
+      if (userId === authUser?.id && data.user) {
+        setAuthUser(data.user);
+      }
       setToast(buildToast('success', t('msgUserUpdated')));
     } catch (error) {
       setToast(buildToast('error', error.message));
@@ -1360,22 +1987,58 @@ export default function App() {
     setToast(buildToast('success', 'Da dang xuat thanh cong.'));
   }
 
-  async function saveSharedState(nextProducts, nextVisuals, nextLossAudits = lossAudits) {
+  async function saveSharedState(nextProducts, nextLossAudits = lossAudits, intent = 'pog', overrides = {}) {
     if (!authToken || !authUser) {
       throw new Error('Vui lòng đăng nhập để chỉnh sửa dữ liệu.');
     }
 
-    const response = await fetch('/api/state', {
+    const bodyPayload = {
+      aisleProducts: nextProducts,
+      lossAudits: Array.isArray(nextLossAudits) ? nextLossAudits : [],
+      intent,
+    };
+
+    if (Array.isArray(overrides.masterProducts)) {
+       bodyPayload.masterProducts = overrides.masterProducts;
+    }
+
+    let finalBody = JSON.stringify(bodyPayload);
+
+    if (finalBody.length > 200 * 1024) {
+      try {
+        const { gzipSync, strToU8 } = await import('fflate');
+        const compressed = gzipSync(strToU8(finalBody));
+        
+        // Ultra-fast Native Base64 conversion for large arrays
+        const b64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            if (typeof result === 'string') {
+              resolve(result.split(',')[1]);
+            } else {
+              resolve('');
+            }
+          };
+          reader.readAsDataURL(new Blob([compressed]));
+        });
+
+        finalBody = JSON.stringify({
+          _compressed: true,
+          data: b64,
+        });
+      } catch (err) {
+        console.warn('Compression failed, sending raw:', err.message);
+      }
+    }
+
+    const response = await fetchJsonWithTimeout('/api/state', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify({
-        aisleProducts: nextProducts,
-        aisleVisuals: nextVisuals,
-        lossAudits: Array.isArray(nextLossAudits) ? nextLossAudits : [],
-      }),
+      body: finalBody,
     });
 
     if (response.status === 401) {
@@ -1392,10 +2055,68 @@ export default function App() {
     const savedState = await response.json();
 
     setAisleProducts(savedState?.aisleProducts || {});
-    setAisleVisuals(savedState?.aisleVisuals || {});
+    setAisleVisuals((current) =>
+      mergeVisualCache(
+        current,
+        savedState?.aisleVisuals && typeof savedState.aisleVisuals === 'object'
+          ? savedState.aisleVisuals
+          : {},
+      ),
+    );
     setLossAudits(Array.isArray(savedState?.lossAudits) ? savedState.lossAudits : []);
+    setMasterProducts(
+      Array.isArray(savedState?.masterProducts)
+        ? dedupeMasterProducts(savedState.masterProducts)
+        : [],
+    );
 
     return savedState;
+  }
+
+  async function saveSharedVisual(lineKey, visual) {
+    if (!authToken || !authUser) {
+      throw new Error('Vui long dang nhap de cap nhat anh line.');
+    }
+
+    if (!lineKey || !visual?.src) {
+      return null;
+    }
+
+    const response = await fetchJsonWithTimeout(`/api/visual?key=${encodeURIComponent(lineKey)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ visual }),
+    });
+
+    if (response.status === 401) {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      setAuthToken('');
+      setAuthUser(null);
+      throw new Error('Phien dang nhap da het han. Vui long dang nhap lai.');
+    }
+
+    if (!response.ok) {
+      throw new Error(`Khong luu duoc anh line (${response.status}).`);
+    }
+
+    const payload = await response.json();
+    const savedVisual = payload?.visual || null;
+
+    if (savedVisual?.src) {
+      setAisleVisuals((current) => ({
+        ...current,
+        [lineKey]: {
+          ...current[lineKey],
+          ...savedVisual,
+          hasSource: true,
+        },
+      }));
+    }
+
+    return savedVisual;
   }
 
   function resetSyncFlow() {
@@ -1476,16 +2197,15 @@ export default function App() {
       ...aisleProducts,
       [key]: cleanedItems,
     };
-    const nextVisuals = extractedVisual?.src
-      ? {
-          ...aisleVisuals,
-          [key]: extractedVisual,
-        }
-      : aisleVisuals;
 
     setIsAiProcessing(true);
     try {
-      await saveSharedState(nextProducts, nextVisuals, lossAudits);
+      await saveSharedState(nextProducts, lossAudits, 'pog');
+
+      if (extractedVisual?.src) {
+        await saveSharedVisual(key, extractedVisual);
+      }
+
       setSelectedId(key);
       closeSyncModal();
       setToast(
@@ -1502,9 +2222,7 @@ export default function App() {
   }
 
   async function handleStockUpdate(product, nextStatus) {
-    if (isReadOnly) {
-      setShowLoginModal(true);
-      setToast(buildToast('error', t('errLoginRequired')));
+    if (!requireFeatureAccess(canEditPog, 'pog')) {
       return;
     }
 
@@ -1539,7 +2257,7 @@ export default function App() {
     setSavingStockKey(saveKey);
 
     try {
-      await saveSharedState(nextProducts, aisleVisuals, lossAudits);
+      await saveSharedState(nextProducts, lossAudits, 'stock');
     } catch (error) {
       setAisleProducts(previousProducts);
       setToast(buildToast('error', error.message || t('errStockSaveFailed')));
@@ -1712,6 +2430,14 @@ export default function App() {
   }
 
   function openBarcodeScanner() {
+    if (activeModule === 'stock' && !requireFeatureAccess(canUseStockTools, 'stock')) {
+      return;
+    }
+
+    if (activeModule === 'loss' && !requireFeatureAccess(canUseLossTools, 'loss')) {
+      return;
+    }
+
     if (cameraPermissionState === 'unsupported') {
       setToast(buildToast('error', t('errScannerNotSupported')));
       return;
@@ -1942,9 +2668,7 @@ export default function App() {
   }
 
   async function handleSaveLossAudit() {
-    if (isReadOnly) {
-      setShowLoginModal(true);
-      setToast(buildToast('error', t('errLoginRequired')));
+    if (!requireFeatureAccess(canUseLossTools, 'loss')) {
       return;
     }
 
@@ -1993,7 +2717,7 @@ export default function App() {
     setIsSavingLossAudit(true);
 
     try {
-      await saveSharedState(aisleProducts, aisleVisuals, nextLossAudits);
+      await saveSharedState(aisleProducts, nextLossAudits, 'loss');
       setLossPeriodName(makeLossPeriodLabel());
       setLossBarcodeInput('');
       setLossDraftItems([]);
@@ -2010,18 +2734,274 @@ export default function App() {
     }
   }
 
+  async function exportStockExcel() {
+    if (!Array.isArray(filteredStockProducts) || filteredStockProducts.length === 0) {
+      setToast(buildToast('error', t('errNoDataToExport')));
+      return;
+    }
+
+    const exportStamp = new Date().toISOString().slice(0, 10);
+    const fileName = `stock-check-${exportStamp}.xlsx`;
+
+    const detailRows = filteredStockProducts.map((product, index) => {
+      return {
+        'STT': index + 1,
+        'SKU': product?.sku || '',
+        'Tên sản phẩm': product?.name || '',
+        'Barcode sản phẩm': product?.barcodeView || product?.barcode || '',
+        'Barcode AEON': product?.productId || '',
+        'Số lượng thực tế': product?.actualStockFromLoss !== '--' ? product.actualStockFromLoss : 0,
+        'Hệ thống': product?.systemStock ?? 0,
+        'Line': product?.lineKey || '',
+        'Nhãn (Loc)': product?.locId || ''
+      };
+    });
+
+    setIsExportingStockFile(true);
+
+    try {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.utils.book_new();
+      const detailSheet = XLSX.utils.json_to_sheet(detailRows);
+
+      XLSX.utils.book_append_sheet(workbook, detailSheet, 'Stock Check');
+      XLSX.writeFile(workbook, fileName);
+
+      setToast(buildToast('success', t('successExportExcel', fileName)));
+    } catch (error) {
+      setToast(buildToast('error', error.message || t('errExportExcelFailed')));
+    } finally {
+      setIsExportingStockFile(false);
+    }
+  }
+
+  async function handleStockImportExcel(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingStockFile(true);
+
+    try {
+      const XLSX = await import('xlsx');
+      const reader = new FileReader();
+
+      reader.onload = async (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          
+          // Use header: 1 to get raw array of arrays (rows)
+          const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+          if (rows.length === 0) {
+            throw new Error('File Excel trống.');
+          }
+
+          // Search for the header row (look through first 20 rows)
+          const skuRegex = /sku|barcode|mahang|masanpham|mavach|code/;
+          const headerRowIndex = rows.slice(0, 20).findIndex(row => 
+            Array.isArray(row) && row.some(cell => skuRegex.test(normaliseSearchText(String(cell)).replace(/\s+/g, '')))
+          );
+
+          if (headerRowIndex === -1) {
+            throw new Error('Không tìm thấy cột SKU hoặc Barcode trong file. Vui lòng đảm bảo file có tiêu đề "SKU" hoặc "Barcode".');
+          }
+
+          const rawHeaders = rows[headerRowIndex];
+          const jsonDataRows = rows.slice(headerRowIndex + 1);
+
+          // Identify column indices using normalized headers
+          const findIndex = (regex) => rawHeaders.findIndex(h => regex.test(normaliseSearchText(String(h)).replace(/\s+/g, '')));
+
+          const lineIdx = findIndex(/line|aisle|khuvuc|day/);
+          const locIdx = findIndex(/loc|stt|vitri|sothutu/);
+          const skuIdx = findIndex(skuRegex);
+          const nameIdx = findIndex(/ten|name|sanpham|mota|description/);
+          const stockIdx = findIndex(/hethong|system|ton|stock|soluong/);
+
+          let updateCount = 0;
+          let addedCount = 0;
+          let lineUpdateCount = 0;
+          const nextAisleProducts = { ...aisleProducts };
+          
+          // Group data by line 
+          const rowsByLine = {};
+          jsonDataRows.forEach(row => {
+            if (!Array.isArray(row) || row.length === 0) return;
+            
+            const skuVal = String(row[skuIdx] || '').trim();
+            if (!skuVal) return; // Skip rows without SKU
+
+            let lineId = selectedId;
+            if (lineIdx >= 0 && row[lineIdx]) {
+              const lineVal = String(row[lineIdx]).trim().toUpperCase();
+              if (lineVal) lineId = lineVal;
+            }
+
+            if (!lineId) return;
+
+            if (!rowsByLine[lineId]) rowsByLine[lineId] = [];
+            rowsByLine[lineId].push(row);
+          });
+
+          if (Object.keys(rowsByLine).length === 0) {
+            throw new Error('Không tìm thấy dữ liệu hợp lệ trong file.');
+          }
+
+          Object.entries(rowsByLine).forEach(([lineId, lineRows]) => {
+            const currentProducts = nextAisleProducts[lineId] || [];
+            const updatedProducts = [...currentProducts];
+            lineUpdateCount++;
+
+            lineRows.forEach(row => {
+              const skuVal = String(row[skuIdx] || '').trim();
+              
+              const matchedIndex = updatedProducts.findIndex(p => 
+                String(p.sku || '').trim() === skuVal || 
+                String(p.barcode || '').trim() === skuVal ||
+                String(p.productId || '').trim() === skuVal
+              );
+
+              const newProductData = {
+                locId: locIdx >= 0 ? (Number(row[locIdx]) || 1) : 1,
+                sku: skuVal,
+                name: nameIdx >= 0 ? String(row[nameIdx] || '').trim() : (matchedIndex >= 0 ? updatedProducts[matchedIndex].name : ''),
+                systemStock: stockIdx >= 0 ? (Number(row[stockIdx]) || 0) : (matchedIndex >= 0 ? updatedProducts[matchedIndex].systemStock : 0),
+                verified: true
+              };
+
+              if (matchedIndex >= 0) {
+                updateCount++;
+                updatedProducts[matchedIndex] = {
+                  ...updatedProducts[matchedIndex],
+                  ...newProductData,
+                  barcode: updatedProducts[matchedIndex].barcode || updatedProducts[matchedIndex].sku || skuVal,
+                  productId: updatedProducts[matchedIndex].productId || updatedProducts[matchedIndex].sku || skuVal
+                };
+              } else {
+                addedCount++;
+                updatedProducts.push({
+                  ...newProductData,
+                  barcode: skuVal,
+                  productId: skuVal,
+                  stockStatus: 'unchecked'
+                });
+              }
+            });
+
+            // Sort by Loc ID descending
+            updatedProducts.sort((a, b) => (Number(b.locId) || 0) - (Number(a.locId) || 0));
+            nextAisleProducts[lineId] = updatedProducts;
+          });
+
+          setAisleProducts(nextAisleProducts);
+          await saveSharedState(nextAisleProducts, lossAudits, 'stock');
+          
+          setToast(buildToast('success', 
+            `Đã cập nhật ${lineUpdateCount} line. (Cập nhật: ${updateCount}, Thêm mới: ${addedCount})`
+          ));
+        } catch (error) {
+          setToast(buildToast('error', error.message));
+        } finally {
+          setIsImportingStockFile(false);
+          event.target.value = '';
+        }
+      };
+
+      reader.readAsArrayBuffer(file);
+    } catch (error) {
+      setToast(buildToast('error', error.message));
+      setIsImportingStockFile(false);
+    }
+  }
+
+  async function handleMasterImportExcel(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!requireFeatureAccess(canEditPog, 'pog')) {
+      event.target.value = '';
+      return;
+    }
+
+    setToast(buildToast('success', 'Đang phân tích dữ liệu Master...'));
+    setIsImportingMaster(true);
+
+    try {
+      const XLSX = await import('xlsx');
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const result = extractMasterProductsFromWorkbook(workbook, XLSX);
+      const nextMaster = result.products;
+
+      if (nextMaster.length === 0) {
+        throw new Error('Không tìm thấy dữ liệu sản phẩm hợp lệ trong file Master.');
+      }
+
+      setMasterProducts(nextMaster);
+      await saveSharedState(aisleProducts, lossAudits, 'pog', {
+        masterProducts: nextMaster,
+      });
+      
+      setToast(buildToast('success', `Cập nhật thành công ${nextMaster.length} sản phẩm. ${result.info || ''}`));
+      setIsImportingMaster(false);
+      event.target.value = '';
+    } catch (error) {
+      console.error('Import Error:', error);
+      setToast(buildToast('error', 'Lỗi khi import: ' + (error.message || 'Không xác định')));
+      setIsImportingMaster(false);
+      event.target.value = '';
+    }
+  }
+
+  async function exportMasterExcel() {
+    if (masterProducts.length === 0) {
+      setToast(buildToast('error', t('errNoDataToExport')));
+      return;
+    }
+
+    setIsExportingMaster(true);
+    try {
+      const XLSX = await import('xlsx');
+      const data = masterProducts.map((p, idx) => ({
+        STT: idx + 1,
+        SKU: p.sku,
+        Barcode: p.barcode,
+        'Product ID': p.productId || '',
+        'Tên sản phẩm': p.name
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Master Items');
+      XLSX.writeFile(workbook, `MasterItems_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (error) {
+      setToast(buildToast('error', error.message));
+    } finally {
+      setIsExportingMaster(false);
+    }
+  }
+
   function renderAisleCard(item, rowType) {
     const isSelectedLine = selectedId ? selectedId.split('-')[0] === item.id : false;
+    const isCategorySelected = highlightedCategory === item.cat;
     const containerClass = [
       'aisle-card',
       rowType === 'secondary' ? 'aisle-card-muted' : '',
       isSelectedLine ? 'aisle-card-selected' : '',
+      isCategorySelected ? 'aisle-card-category-highlight' : '',
     ]
       .filter(Boolean)
       .join(' ');
 
     return (
-      <article key={item.id} className={containerClass}>
+      <article key={item.id} id={`aisle-${item.id}`} className={containerClass}>
+        <div className="aisle-card-tooltip">
+          <strong>{item.name}</strong>
+          <span>{item.cat}</span>
+        </div>
         <header className="aisle-card-header">{item.id}</header>
         <div className="aisle-card-sides">
           {['A', 'B'].map((side) => {
@@ -2043,7 +3023,47 @@ export default function App() {
     );
   }
 
+  function renderAisleSummary(groupedAisles) {
+    if (!groupedAisles || Object.keys(groupedAisles).length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="aisle-summary-container">
+        {Object.entries(groupedAisles).map(([cat, aisles]) => (
+          <button
+            key={cat}
+            type="button"
+            className={`aisle-summary-cat-chip ${highlightedCategory === cat ? 'is-active' : ''}`}
+            onClick={() => {
+              if (highlightedCategory === cat) {
+                setHighlightedCategory(null);
+              } else {
+                setHighlightedCategory(cat);
+                const firstAisle = aisles[0];
+                if (firstAisle) {
+                  const el = document.getElementById(`aisle-${firstAisle.id}`);
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }
+              }
+            }}
+          >
+            <span>{cat}</span>
+            <small>{aisles.length} Line</small>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   const selectedCount = selectedShelf?.data.products.length || 0;
+  const selectedFontOption = FONT_OPTIONS.find((fontOption) => fontOption.family === selectedFont);
+  const settingsAccountName = authUser?.displayName || authUser?.username || t('settingsAccount');
+  const settingsAccountRole = authUser
+    ? t(authUser.role === 'admin' ? 'roleAdmin' : 'rolePicker')
+    : '';
   const topbarModuleLabel =
     activeModule === 'pog'
       ? t('pogWorkspace')
@@ -2075,14 +3095,33 @@ export default function App() {
               ]
             : []),
         ]
-      : [
-          {
-            label: t('savedPeriods'),
-            value: lossAudits.length,
-          },
-          {
-            label: t('scanningSkus'),
-            value: lossDraftSummary.totalItems,
+      : activeModule === 'stock'
+        ? [
+            {
+              label: 'Tổng sản phẩm',
+              value: filteredStockProducts.length,
+            },
+            {
+              label: 'Đã khớp',
+              value: filteredStockProducts.filter(p => p.stockStatus === 'ok').length,
+            },
+            {
+              label: 'Sai lệch',
+              value: filteredStockProducts.filter(p => p.stockStatus === 'warning').length,
+            },
+            {
+              label: 'Lỗi/Thiếu',
+              value: filteredStockProducts.filter(p => p.stockStatus === 'error').length,
+            },
+          ]
+        : [
+            {
+              label: t('savedPeriods'),
+              value: lossAudits.length,
+            },
+            {
+              label: t('scanningSkus'),
+              value: lossDraftSummary.totalItems,
           },
           {
             label: t('systemStock'),
@@ -2102,10 +3141,56 @@ export default function App() {
           <p className="drawer-overline">
             L{selectedShelf.id} | Side {selectedShelf.side}
           </p>
-          <h2>
-            <Target size={16} />
-            <span>{selectedShelf.name}</span>
-          </h2>
+          <div className="drawer-header-title-row">
+            {isRenamingAisle ? (
+              <div className="aisle-rename-form">
+                <input
+                  type="text"
+                  value={tempAisleName}
+                  onChange={(e) => setTempAisleName(e.target.value)}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRenameAisle(selectedShelf.id, tempAisleName);
+                    if (e.key === 'Escape') setIsRenamingAisle(false);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="primary-button btn-xs"
+                  onClick={() => handleRenameAisle(selectedShelf.id, tempAisleName)}
+                >
+                  <Check size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button btn-xs"
+                  onClick={() => setIsRenamingAisle(false)}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <h2>
+                  <Target size={16} />
+                  <span>{selectedShelf.name}</span>
+                </h2>
+                {isAdminAccount && (
+                  <button
+                    type="button"
+                    className="icon-button icon-button-ghost btn-xs"
+                    onClick={() => {
+                      setTempAisleName(selectedShelf.name);
+                      setIsRenamingAisle(true);
+                    }}
+                    title="Đổi tên line"
+                  >
+                    <Settings size={14} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         <button
@@ -2134,6 +3219,13 @@ export default function App() {
               <span className="mobile-selected-pill">
                 {selectedShelf.cat}
               </span>
+            </div>
+          ) : null}
+
+          {loadingVisualKey === selectedId ? (
+            <div className="shared-loading shared-loading-inline">
+              <span className="shared-loading-dot"></span>
+              <p>Dang tai anh line...</p>
             </div>
           ) : null}
 
@@ -2221,9 +3313,9 @@ export default function App() {
                       </select>
                     </div>
 
-                    {product.name ? (
+                    {product.displayName ? (
                       <div className="product-name">
-                        <HighlightText text={product.name} highlight={searchTerm} />
+                        <HighlightText text={product.displayName} highlight={searchTerm} />
                       </div>
                     ) : (
                       <div className="product-placeholder" />
@@ -2255,9 +3347,19 @@ export default function App() {
             <div className="empty-state">
               <Database size={42} strokeWidth={1.4} />
               <p>Line này chưa có dữ liệu hàng hóa</p>
-              {isReadOnly ? (
-                <button type="button" className="inline-link" onClick={() => setShowLoginModal(true)}>
-                  Đăng nhập để cập nhật POG
+              {!canEditPog ? (
+                <button
+                  type="button"
+                  className="inline-link"
+                  onClick={() => {
+                    if (!authUser) {
+                      setShowLoginModal(true);
+                    } else {
+                      setToast(buildToast('error', 'Tai khoan nay chua duoc cap quyen POG.'));
+                    }
+                  }}
+                >
+                  {!authUser ? 'Đăng nhập để cập nhật POG' : 'Tài khoản này chỉ có quyền xem'}
                 </button>
               ) : (
                 <button type="button" className="inline-link" onClick={openSyncModal}>
@@ -2281,6 +3383,18 @@ export default function App() {
             <span>{t('stockSubtitle')}</span>
           </h2>
           <p>{t('stockDescription')}</p>
+        </div>
+
+        <div className="summary-strip summary-strip-inline" aria-label="Tổng quan kiểm tồn">
+          {moduleSummaryItems.map((item) => (
+            <article
+              key={`stock-summary-${item.label}`}
+              className={`summary-card ${item.highlight ? 'summary-card-highlight' : ''}`}
+            >
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -2309,56 +3423,107 @@ export default function App() {
                 />
                 <button type="button" className="secondary-button loss-scan-button" onClick={openBarcodeScanner}>
                   <Camera size={16} />
-                  <span>Quét barcode</span>
                 </button>
                 <button type="submit" className="primary-button">
                   <Search size={16} />
-                  <span>Lọc tìm</span>
+                  <span>Tìm</span>
                 </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  title="Nhập Excel Master"
+                  disabled={isImportingStockFile}
+                  onClick={() => stockImportInputRef.current?.click()}
+                >
+                  <FileUp size={16} />
+                  <span>Cập nhật File</span>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  title="Tải báo cáo"
+                  disabled={isExportingStockFile || filteredStockProducts.length === 0}
+                  onClick={exportStockExcel}
+                >
+                  <Download size={16} />
+                  <span>Xuất báo cáo</span>
+                </button>
+                <input
+                  type="file"
+                  ref={stockImportInputRef}
+                  style={{ display: 'none' }}
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleStockImportExcel}
+                />
               </div>
             </label>
           </form>
 
           {checkStockSearchTerm ? (
-             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--accent-primary)', borderRadius: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-               <span>{t('filteringBy')} <strong>{checkStockSearchTerm}</strong></span>
-               <button className="secondary-button" onClick={() => { setCheckStockSearchTerm(''); setCheckStockBarcodeInput(''); }}>{t('btnClearFilter')}</button>
+             <div className="glass-panel" style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', borderRadius: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               <span style={{ color: 'var(--accent-primary)' }}>{t('filteringBy')} <strong>{checkStockSearchTerm}</strong></span>
+               <button className="secondary-button" style={{minWidth: 'auto', padding: '0.4rem 0.8rem'}} onClick={() => { setCheckStockSearchTerm(''); setCheckStockBarcodeInput(''); }}>{t('btnClearFilter')}</button>
              </div>
           ) : null}
           
-          <div className="loss-draft-list" style={{ marginTop: '2rem' }}>
+          <div className="loss-draft-list" style={{ marginTop: '2rem', display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
             {filteredStockProducts.length > 0 ? (
               filteredStockProducts.map((product, idx) => {
                 const stockMeta = getStockMeta(product.stockStatus);
+                const masterInfo = masterProducts.find(m => m.sku === product.sku || m.barcode === product.barcode || m.barcode === product.productId);
+                
                 return (
-                  <article key={`${product.locId}-${product.sku}-${idx}`} className="loss-item-row" style={{ padding: '1.2rem', gap: '1.2rem' }}>
-                    <div className="loss-item-main">
-                      <h4>
-                         <HighlightText text={product.name || 'Sản phẩm chưa có tên'} highlight={checkStockSearchTerm} />
-                      </h4>
-                      <p>{product.lineKey} | Nhãn {product.locId} | SKU {product.sku || '--'}</p>
-                      <p>Barcode: {product.barcodeView || '--'}</p>
-                    </div>
-
-                    <div className="loss-item-controls" style={{ flexWrap: 'wrap', justifyContent: 'flex-end', gap: '1rem' }}>
-                      <span className={`stock-summary-pill stock-summary-pill-${stockMeta.tone}`}>
-                        <span>Stock</span>
+                  <article key={`${product.locId}-${product.sku}-${idx}`} className="loss-item-row" style={{ padding: '1.2rem', gap: '1rem', flexDirection: 'column', alignItems: 'flex-start', border: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
+                      <div className="loss-item-main" style={{ flex: 1 }}>
+                        <h4 style={{ fontSize: '1.1rem', marginBottom: '0.4rem', color: '#1e293b' }}>
+                           <HighlightText text={resolveProductName(product) || 'Sản phẩm chưa có tên'} highlight={checkStockSearchTerm} />
+                        </h4>
+                        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
+                            Line {product.lineKey} | {product.locId}
+                          </span>
+                          <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
+                            SKU: {product.sku || '--'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className={`stock-summary-pill stock-summary-pill-${stockMeta.tone}`} style={{ flexShrink: 0 }}>
+                        <CheckCircle2 size={12} style={{marginRight: '0.3rem'}} />
                         <strong>{stockMeta.shortLabel}</strong>
                       </span>
-                      <div className="loss-delta-pill" style={{ background: '#f1f5f9', color: '#0f172a' }}>
-                        <span>Hệ thống</span>
-                        <strong>{product.systemStock ?? '--'}</strong>
-                      </div>
-                      <div className="loss-delta-pill" style={{ background: 'var(--accent-primary)', color: '#fff' }}>
-                        <span>Thực tế</span>
-                        <strong>{product.actualStockFromLoss}</strong>
-                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', width: '100%', gap: '1rem', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.8rem', borderTop: '1px solid #f8fafc' }}>
+                       <div style={{ flex: 1 }}>
+                         {(masterInfo?.division || masterInfo?.department) && (
+                           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>
+                             {masterInfo.division} {masterInfo.department ? `› ${masterInfo.department}` : ''}
+                           </p>
+                         )}
+                         <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>Barcode: {product.barcodeView || '--'}</p>
+                       </div>
+                       
+                       <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <div className="loss-delta-pill" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}>
+                            <span>Máy</span>
+                            <strong>{product.systemStock ?? '--'}</strong>
+                          </div>
+                          <div className="loss-delta-pill" style={{ 
+                            background: product.actualStockFromLoss > 0 ? 'rgba(16, 185, 129, 0.1)' : '#f1f5f9', 
+                            color: product.actualStockFromLoss > 0 ? '#059669' : '#94a3b8',
+                            border: product.actualStockFromLoss > 0 ? '1px solid rgba(16, 185, 129, 0.2)' : '1px solid #e2e8f0'
+                          }}>
+                            <span>Thực</span>
+                            <strong>{product.actualStockFromLoss}</strong>
+                          </div>
+                       </div>
                     </div>
                   </article>
                 );
               })
             ) : (
-              <div className="empty-state loss-empty-state">
+              <div className="empty-state loss-empty-state" style={{ gridColumn: '1 / -1' }}>
                 <PackageSearch size={34} strokeWidth={1.4} />
                 <p>{t('noProductFound')}</p>
               </div>
@@ -2463,9 +3628,9 @@ export default function App() {
             </button>
           </div>
 
-          {!isReadOnly ? null : (
+          {canUseLossTools ? null : (
             <p className="helper-text loss-readonly-note">
-              {t('readOnlyNote')}
+              {authUser ? 'Tai khoan nay chi co quyen xem module loss.' : t('readOnlyNote')}
             </p>
           )}
 
@@ -2482,7 +3647,7 @@ export default function App() {
                   <article key={item.id} className="loss-item-row">
                     <div className="loss-item-main">
                       <h4>
-                        <HighlightText text={item.name || t('unlabeledProduct')} highlight={lossSearchTerm} />
+                        <HighlightText text={resolveProductName(item) || t('unlabeledProduct')} highlight={lossSearchTerm} />
                       </h4>
                       <p>
                         {item.lineKey} | {t('labelLoc')} {item.locId} | SKU {item.sku || '--'}
@@ -2617,38 +3782,66 @@ export default function App() {
             ) : null}
           </div>
 
-          <div className="map-switcher">
-            <button
-              type="button"
-              className={mobileMapSection === 'main' ? 'is-active' : ''}
-              onClick={() => setMobileMapSection('main')}
-            >
-              Line chính
-            </button>
-            <button
-              type="button"
-              className={mobileMapSection === 'secondary' ? 'is-active' : ''}
-              onClick={() => setMobileMapSection('secondary')}
-            >
-              Line phụ
-            </button>
+          <div className="map-panel-body">
+            <div className="map-switcher">
+              <button
+                type="button"
+                className={mobileMapSection === 'main' ? 'is-active' : ''}
+                onClick={() => setMobileMapSection('main')}
+              >
+                Line chính
+              </button>
+              <button
+                type="button"
+                className={mobileMapSection === 'secondary' ? 'is-active' : ''}
+                onClick={() => setMobileMapSection('secondary')}
+              >
+                Line phụ
+              </button>
+            </div>
+
+            <div className="aisle-grid aisle-grid-mobile">
+              {(mobileMapSection === 'secondary' ? SECONDARY_AISLES : MAIN_AISLES).map((item) => {
+                const displayAisle = allLines.find(a => a.id === item.id) || item;
+                return renderAisleCard(displayAisle, mobileMapSection === 'secondary' ? 'secondary' : 'primary');
+              })}
+            </div>
           </div>
 
-          <div className="aisle-grid aisle-grid-mobile">
-            {(mobileMapSection === 'secondary' ? SECONDARY_AISLES : MAIN_AISLES).map((item) =>
-              renderAisleCard(item, mobileMapSection === 'secondary' ? 'secondary' : 'primary'),
-            )}
+          <div className="map-panel-footer">
+            {renderAisleSummary(mobileMapSection === 'secondary' ? groupedSecondaryAisles : groupedMainAisles)}
           </div>
         </>
       ) : (
         <>
-          <div className="section-label">Bản đồ line phụ</div>
-          <div className="aisle-grid">{SECONDARY_AISLES.map((item) => renderAisleCard(item, 'secondary'))}</div>
+          <div className="map-panel-head">
+            <div className="section-label">Bản đồ line hàng</div>
+          </div>
 
-          <div className="walkway">Lối đi chính | Picker Path</div>
+          <div className="map-panel-body">
+            <div className="section-label">Bản đồ line phụ</div>
+            <div className="aisle-grid">
+              {SECONDARY_AISLES.map((item) => {
+                const displayAisle = allLines.find(a => a.id === item.id) || item;
+                return renderAisleCard(displayAisle, 'secondary');
+              })}
+            </div>
 
-          <div className="section-label">Bản đồ line chính</div>
-          <div className="aisle-grid">{MAIN_AISLES.map((item) => renderAisleCard(item, 'primary'))}</div>
+            <div className="walkway">Lối đi chính | Picker Path</div>
+
+            <div className="section-label">Bản đồ line chính</div>
+            <div className="aisle-grid">
+              {MAIN_AISLES.map((item) => {
+                const displayAisle = allLines.find(a => a.id === item.id) || item;
+                return renderAisleCard(displayAisle, 'primary');
+              })}
+            </div>
+          </div>
+
+          <div className="map-panel-footer">
+            {renderAisleSummary(groupedSecondaryAisles)}
+            {renderAisleSummary(groupedMainAisles)}
+          </div>
         </>
       )}
     </section>
@@ -2679,27 +3872,30 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-inner">
           {/* Logo - click để reset về màn hình chính */}
-          <div
-            className="brand"
-            role="button"
-            tabIndex={0}
-            title="Về trang chủ"
-            onClick={() => {
-              setSelectedId('L12-A');
-              setActiveModule('pog');
-              setSearchTerm('');
-              setFocusedLọcId(null);
-            }}
-            onKeyDown={(e) => e.key === 'Enter' && setActiveModule('pog')}
-          >
-            <div className="brand-mark">
-              <PackageSearch size={18} />
+          {!mobileSearchOpen && (
+            <div
+              className="brand"
+              role="button"
+              tabIndex={0}
+              title="Về trang chủ"
+              onClick={() => {
+                setSelectedId('L12-A');
+                setActiveModule('pog');
+                setSearchTerm('');
+                setSearchInput('');
+                setFocusedLọcId(null);
+              }}
+              onKeyDown={(e) => e.key === 'Enter' && setActiveModule('pog')}
+            >
+              <div className="brand-mark">
+                <PackageSearch size={18} />
+              </div>
+              <div className="brand-text">
+                <p className="brand-title">Picker Assistant</p>
+                <p className="brand-subtitle">{topbarModuleLabel}</p>
+              </div>
             </div>
-            <div className="brand-text">
-              <p className="brand-title">Picker Assistant</p>
-              <p className="brand-subtitle">{topbarModuleLabel}</p>
-            </div>
-          </div>
+          )}
 
           <div className="topbar-divider" />
 
@@ -2709,6 +3905,7 @@ export default function App() {
               type="button"
               className={activeModule === 'pog' ? 'is-active' : ''}
               onClick={() => setActiveModule('pog')}
+              title="Planogram (POG)"
             >
               <LayoutGrid size={18} />
               <span>POG</span>
@@ -2717,6 +3914,7 @@ export default function App() {
               type="button"
               className={activeModule === 'loss' ? 'is-active' : ''}
               onClick={() => setActiveModule('loss')}
+              title={t('moduleLoss')}
             >
               <ClipboardList size={18} />
               <span>{t('moduleLoss')}</span>
@@ -2725,6 +3923,7 @@ export default function App() {
               type="button"
               className={activeModule === 'stock' ? 'is-active' : ''}
               onClick={() => setActiveModule('stock')}
+              title={t('moduleStock')}
             >
               <CheckCircle2 size={18} />
               <span>{t('moduleStock')}</span>
@@ -2736,8 +3935,8 @@ export default function App() {
             <Search size={14} />
             <input
               type="text"
-              value={topbarSearchValue}
-              onChange={(event) => handleTopbarSearchChange(event.target.value)}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
               placeholder={topbarSearchPlaceholder}
               autoFocus={mobileSearchOpen}
             />
@@ -2758,16 +3957,29 @@ export default function App() {
               <>
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="secondary-button with-primary-importance topbar-manage-btn"
                   onClick={() => setShowManagePogModal(true)}
+                  title={t('btnManagePog')}
                 >
                   <Database size={14} />
                   <span>{t('btnManagePog')}</span>
                 </button>
                 <button
                   type="button"
-                  className="primary-button"
-                  disabled={isReadOnly}
+                  className="secondary-button"
+                  onClick={() => {
+                    console.log('Opening Master Modal (POG branch)');
+                    setShowMasterModal(true);
+                  }}
+                  title={t('btnManageMaster')}
+                >
+                  <TableProperties size={14} />
+                  <span>{t('btnManageMaster')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="primary-button with-primary-importance"
+                  disabled={!canEditPog}
                   onClick={openSyncModal}
                   title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
                 >
@@ -2775,12 +3987,25 @@ export default function App() {
                   <span>{t('btnUpdatePog')}</span>
                 </button>
               </>
-            ) : null}
+            ) : (
+                <button
+                  type="button"
+                  className="secondary-button topbar-global-master-btn"
+                  onClick={() => {
+                    console.log('Opening Master Modal (Global branch)');
+                    setShowMasterModal(true);
+                  }}
+                  title={t('btnManageMaster')}
+                >
+                  <TableProperties size={14} />
+                  <span>{t('btnManageMaster')}</span>
+                </button>
+            )}
 
             {isReadOnly ? (
               <button
                 type="button"
-                className="secondary-button"
+                className="secondary-button topbar-auth-btn"
                 onClick={() => setShowLoginModal(true)}
                 title={t('btnLogin')}
               >
@@ -2797,7 +4022,7 @@ export default function App() {
                 ) : null}
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="secondary-button topbar-auth-btn"
                   onClick={handleLogout}
                   title={t('btnLogout')}
                 >
@@ -2829,7 +4054,7 @@ export default function App() {
 
             <button
               type="button"
-              className="topbar-icon-btn mobile-search-toggle"
+              className="topbar-icon-btn mobile-search-toggle desktop-search-toggle"
               onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
               title="Tìm kiếm"
             >
@@ -3109,7 +4334,14 @@ export default function App() {
                             <Download size={15} />
                             {t('btnDownloadExcel')}
                           </button>
-                          <button type="button" className="secondary-button" style={{ color: '#dc2626' }} title="Xóa POG Line này" onClick={() => deletePogData(lineKey)}>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ color: '#dc2626' }}
+                            title={!canEditPog ? 'Tai khoan nay chi co quyen xem POG' : 'Xóa POG Line này'}
+                            disabled={!canEditPog}
+                            onClick={() => deletePogData(lineKey)}
+                          >
                             <Trash2 size={15} />
                           </button>
                         </div>
@@ -3280,12 +4512,17 @@ export default function App() {
       {showManageUsersModal ? (
         <div className="modal-backdrop" role="presentation" onClick={() => setShowManageUsersModal(false)}>
           <section className="modal account-center-modal" onClick={(e) => e.stopPropagation()}>
-            <header className="modal-header">
-              <div className="modal-title">
-                <UserRound size={24} />
-                <span>{t('accountCenterTitle')}</span>
+            <header className="account-center-header">
+              <div className="account-center-header-copy">
+                <p className="account-center-kicker">{manageAccountsLabel}</p>
+                <h2>{manageAccountsLabel}</h2>
+                <p className="account-center-subtitle">{t('accountCenterSubtitle')}</p>
               </div>
-              <button type="button" className="icon-button" onClick={() => setShowManageUsersModal(false)}>
+              <button
+                type="button"
+                className="icon-button account-center-close-button"
+                onClick={() => setShowManageUsersModal(false)}
+              >
                 <X size={24} />
               </button>
             </header>
@@ -3298,20 +4535,46 @@ export default function App() {
                 <UserRound size={16} />
                 <span>{t('tabProfile')}</span>
               </button>
-              {authUser?.role === 'admin' && (
+              {canManageAccounts && (
                 <button 
                   className={`tab-btn ${accountTab === 'members' ? 'is-active' : ''}`}
                   onClick={() => setAccountTab('members')}
                 >
                   <Users size={16} />
-                  <span>{t('tabMembers')}</span>
+                  <span>{accountsTabLabel}</span>
                 </button>
               )}
             </div>
 
-            <div className="modal-body">
+            <div className="modal-body account-center-body">
               {accountTab === 'profile' ? (
-                <div className="profile-tab-content">
+                <div className="account-tab-shell">
+                  <section className="account-section-card">
+                    <div className="account-section-head">
+                      <div>
+                        <p className="account-section-kicker">{t('tabProfile')}</p>
+                        <h3>{t('profileSectionTitle')}</h3>
+                        <p>{t('profileSectionHint')}</p>
+                      </div>
+                    </div>
+
+                    <div className="account-profile-hero">
+                      <div className="account-profile-avatar">
+                        <UserRound size={18} />
+                      </div>
+                      <div className="account-profile-meta">
+                        <strong>{settingsAccountName}</strong>
+                        <span>@{authUser?.username}</span>
+                      </div>
+                      <span className="account-profile-role">{settingsAccountRole}</span>
+                    </div>
+
+                    {isAdminAccount ? (
+                      <p className="helper-text user-admin-note">
+                        Tai khoan admin luon co day du quyen va chi doi duoc mat khau.
+                      </p>
+                    ) : null}
+
                   <form 
                     className="account-form"
                     onSubmit={async (e) => {
@@ -3319,12 +4582,17 @@ export default function App() {
                       const fd = new FormData(e.currentTarget);
                       const displayName = fd.get('displayName');
                       const password = fd.get('password');
-                      const patch = { displayName };
+                      const patch = {};
+                      if (!isAdminAccount) {
+                        patch.displayName = displayName;
+                      }
                       if (password) patch.password = password;
                       
                       await handleUpdateUser(authUser.id, patch);
                       // Update local user info if needed
-                      setAuthUser(prev => ({ ...prev, displayName }));
+                      if (!isAdminAccount) {
+                        setAuthUser(prev => ({ ...prev, displayName }));
+                      }
                       e.currentTarget.reset();
                     }}
                   >
@@ -3335,7 +4603,14 @@ export default function App() {
                       </div>
                       <div className="form-field">
                         <label>{t('lblDisplayName')}</label>
-                        <input name="displayName" type="text" defaultValue={authUser?.displayName} required />
+                        <input
+                          name="displayName"
+                          type="text"
+                          defaultValue={authUser?.displayName}
+                          required={!isAdminAccount}
+                          disabled={isAdminAccount}
+                          className={isAdminAccount ? 'readonly-input' : ''}
+                        />
                       </div>
                       <div className="form-field">
                         <label>{t('lblPassword')} ({t('btnChangePassword')})</label>
@@ -3347,9 +4622,19 @@ export default function App() {
                       <span>{t('btnSave')}</span>
                     </button>
                   </form>
+                  </section>
                 </div>
               ) : (
-                <div className="members-tab-content">
+                <div className="account-tab-shell">
+                  <section className="account-section-card">
+                    <div className="account-section-head">
+                      <div>
+                        <p className="account-section-kicker">{accountsTabLabel}</p>
+                        <h3>{createAccountLabel}</h3>
+                        <p>{t('membersSectionHint')}</p>
+                      </div>
+                    </div>
+
                   <form 
                     className="add-user-form"
                     onSubmit={async (e) => {
@@ -3361,6 +4646,10 @@ export default function App() {
                     }}
                   >
                     <div className="form-grid compact-grid">
+                      <div className="form-field">
+                        <label>{t('lblDisplayName')}</label>
+                        <input name="displayName" type="text" required placeholder="Nguyen Van A" />
+                      </div>
                       <div className="form-field">
                         <label>{t('lblUsername')}</label>
                         <input name="username" type="text" required placeholder="user01" />
@@ -3382,83 +4671,111 @@ export default function App() {
                       <span>{t('btnCreateUser')}</span>
                     </button>
                   </form>
+                  </section>
 
-                  <div className="user-table-wrapper">
-                    <table className="user-table">
-                      <thead>
-                        <tr>
-                          <th>{t('lblUsername')}</th>
-                          <th>{t('lblDisplayName')}</th>
-                          <th>{t('lblRole')}</th>
-                          <th>{t('lblPermissions')}</th>
-                          <th>{t('btnResetPassword')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {usersList.map((u) => (
-                          <tr key={u.id} className={u.enabled === false ? 'is-disabled' : ''}>
-                            <td>
-                              <div className="user-cell-main">
-                                <strong>{u.username}</strong>
-                                <div className="toggle-switch mini">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={u.enabled !== false} 
-                                    onChange={(e) => handleUpdateUser(u.id, { enabled: e.target.checked })}
-                                  />
-                                  <span className="toggle-slider"></span>
-                                </div>
-                              </div>
-                            </td>
-                            <td>{u.displayName}</td>
-                            <td>
+                  <section className="account-section-card">
+                    <div className="account-section-head">
+                      <div>
+                        <p className="account-section-kicker">{manageAccountsLabel}</p>
+                        <h3>{accountListLabel}</h3>
+                        <p>{t('membersListHint')}</p>
+                      </div>
+                    </div>
+
+                  <div className="user-card-list">
+                    {usersList.map((u) => {
+                      const isLockedAdminUser = u.role === 'admin';
+
+                      return (
+                      <div key={u.id} className={`user-card ${u.enabled === false ? 'is-disabled' : ''} ${isLockedAdminUser ? 'is-admin-card' : ''}`}>
+                        <div className="user-card-top">
+                          <div className="user-card-avatar">
+                            <UserRound size={22} />
+                          </div>
+                          <div className="user-card-meta">
+                            <h3>{u.displayName || u.username}</h3>
+                            <p>@{u.username}</p>
+                          </div>
+                          <div className="user-card-status">
+                            {isLockedAdminUser ? (
+                              <span className="settings-account-role-badge">Admin</span>
+                            ) : null}
+                            <div className="switch-ui" title={u.enabled !== false ? t('statusEnabled') : t('statusDisabled')}>
+                              <input 
+                                type="checkbox" 
+                                id={`enabled-${u.id}`}
+                                checked={u.enabled !== false} 
+                                disabled={isLockedAdminUser}
+                                onChange={(e) => handleUpdateUser(u.id, { enabled: e.target.checked })}
+                              />
+                              <label htmlFor={`enabled-${u.id}`} className="switch-slider"></label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="user-card-body">
+                          <div className="user-card-roles">
+                            <div className="form-field-compact">
+                              <label>{t('lblRole')}</label>
                               <select 
                                 className="inline-select"
                                 value={u.role}
+                                disabled={isLockedAdminUser}
                                 onChange={(e) => handleUpdateUser(u.id, { role: e.target.value })}
                               >
                                 <option value="picker">{t('rolePicker')}</option>
                                 <option value="admin">{t('roleAdmin')}</option>
                               </select>
-                            </td>
-                            <td>
-                              <div className="permission-pills">
-                                {['pog', 'loss', 'stock'].map(p => (
-                                  <button
-                                    key={p}
-                                    type="button"
-                                    className={`perm-pill ${u.permissions?.[p] ? 'is-active' : ''}`}
-                                    disabled={u.role === 'admin'}
-                                    onClick={() => {
-                                      const nextPerms = { ...u.permissions, [p]: !u.permissions?.[p] };
-                                      handleUpdateUser(u.id, { permissions: nextPerms });
-                                    }}
-                                  >
-                                    {p.toUpperCase()}
-                                  </button>
-                                ))}
-                              </div>
-                            </td>
-                            <td>
-                              <button 
-                                type="button" 
-                                className="icon-button"
-                                title={t('btnResetPassword')}
-                                onClick={() => {
-                                  const newPass = window.prompt(`${t('btnResetPassword')} for ${u.username}:`);
-                                  if (newPass && newPass.length >= 4) {
-                                    handleUpdateUser(u.id, { password: newPass });
-                                  }
-                                }}
-                              >
-                                <Sparkles size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            </div>
+
+                            <div className="perm-switch-group">
+                              {['pog', 'loss', 'stock'].map(p => (
+                                <div key={p} className="perm-switch-item" title={t(`module${p.charAt(0).toUpperCase() + p.slice(1)}`)}>
+                                  <div className="switch-ui">
+                                    <input 
+                                      type="checkbox" 
+                                      id={`perm-${u.id}-${p}`}
+                                      checked={!!u.permissions?.[p]} 
+                                      disabled={isLockedAdminUser}
+                                      onChange={() => {
+                                        const nextPerms = { ...u.permissions, [p]: !u.permissions?.[p] };
+                                        handleUpdateUser(u.id, { permissions: nextPerms });
+                                      }}
+                                    />
+                                    <label htmlFor={`perm-${u.id}-${p}`} className="switch-slider"></label>
+                                  </div>
+                                  <span>{p}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {isLockedAdminUser ? (
+                          <p className="helper-text user-admin-note">
+                            Tai khoan admin luon dung duoc tat ca chuc nang va chi reset mat khau.
+                          </p>
+                        ) : null}
+
+                        <div className="user-card-actions">
+                          <button 
+                            type="button" 
+                            className="action-btn-pill"
+                            onClick={() => {
+                              const newPass = window.prompt(`${t('btnResetPassword')} for ${u.username}:`);
+                              if (newPass && newPass.length >= 4) {
+                                handleUpdateUser(u.id, { password: newPass });
+                              }
+                            }}
+                          >
+                            <Key size={14} />
+                            <span>{t('btnResetPassword')}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )})}
                   </div>
+                  </section>
                 </div>
               )}
             </div>
@@ -3472,10 +4789,15 @@ export default function App() {
         <div className="settings-backdrop" role="dialog" aria-modal="true" onClick={() => setShowSettings(false)}>
           <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
             <div className="settings-header">
-              <h2>{t('settingsTitle')}</h2>
+              <div className="settings-header-copy">
+                <p className="settings-kicker">{t('settingsTitle')}</p>
+                <h2>{t('settingsTitle')}</h2>
+                <p className="settings-subtitle">{t('settingsSubtitle')}</p>
+              </div>
+
               <button
                 type="button"
-                className="icon-button"
+                className="icon-button settings-close-button"
                 onClick={() => setShowSettings(false)}
                 aria-label={t('btnClose')}
               >
@@ -3484,102 +4806,420 @@ export default function App() {
             </div>
 
             <div className="settings-body">
-              <div className="settings-compact-grid">
-                <div className="settings-cell">
-                  <label className="settings-label">{t('settingsTheme')}</label>
-                  <div className="compact-toggle">
-                    <button className={!isDarkMode ? 'active' : ''} onClick={() => setIsDarkMode(false)}>
-                      <div className="icon-box mini">
-                        <Sun size={12} />
-                      </div>
-                      <span>{t('themeLight')}</span>
-                    </button>
-                    <button className={isDarkMode ? 'active' : ''} onClick={() => setIsDarkMode(true)}>
-                      <div className="icon-box mini">
-                        <Moon size={12} />
-                      </div>
-                      <span>{t('themeDark')}</span>
-                    </button>
+              <section className="settings-section-card">
+                <div className="settings-section-head">
+                  <div>
+                    <p className="settings-section-eyebrow">{t('settingsDisplayTitle')}</p>
+                    <h3 className="settings-card-title">{t('settingsDisplayTitle')}</h3>
+                    <p className="settings-card-description">{t('settingsDisplayHint')}</p>
                   </div>
                 </div>
-                <div className="settings-cell">
-                  <label className="settings-label">{t('settingsLanguage')}</label>
-                  <div className="compact-toggle">
-                    <button className={language === 'vi' ? 'active' : ''} onClick={() => setLanguage('vi')}>
-                      <div className="icon-box mini">
-                         <span style={{ fontSize: '10px' }}>VI</span>
-                      </div>
-                      <span>{t('langVi')}</span>
-                    </button>
-                    <button className={language === 'en' ? 'active' : ''} onClick={() => setLanguage('en')}>
-                      <div className="icon-box mini">
-                         <span style={{ fontSize: '10px' }}>EN</span>
-                      </div>
-                      <span>{t('langEn')}</span>
-                    </button>
+
+                <div className="settings-compact-grid">
+                  <div className="settings-cell">
+                    <label className="settings-label">{t('settingsTheme')}</label>
+                    <div className="compact-toggle">
+                      <button type="button" className={!isDarkMode ? 'active' : ''} onClick={() => setIsDarkMode(false)}>
+                        <div className="icon-box mini">
+                          <Sun size={12} />
+                        </div>
+                        <span>{t('themeLight')}</span>
+                      </button>
+                      <button type="button" className={isDarkMode ? 'active' : ''} onClick={() => setIsDarkMode(true)}>
+                        <div className="icon-box mini">
+                          <Moon size={12} />
+                        </div>
+                        <span>{t('themeDark')}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-cell">
+                    <label className="settings-label">{t('settingsLanguage')}</label>
+                    <div className="compact-toggle">
+                      <button type="button" className={language === 'vi' ? 'active' : ''} onClick={() => setLanguage('vi')}>
+                        <div className="icon-box mini">
+                          <span className="compact-toggle-code">VI</span>
+                        </div>
+                        <span>{t('langVi')}</span>
+                      </button>
+                      <button type="button" className={language === 'en' ? 'active' : ''} onClick={() => setLanguage('en')}>
+                        <div className="icon-box mini">
+                          <span className="compact-toggle-code">EN</span>
+                        </div>
+                        <span>{t('langEn')}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-cell wide">
+                    <label className="settings-label">{t('settingsAccentColor')}</label>
+                    <div className="accent-pills-row">
+                      {ACCENT_COLORS.map((color) => (
+                        <button
+                          key={color.id}
+                          type="button"
+                          className={`accent-pill ${accentColor === color.hex ? 'active' : ''}`}
+                          style={{ background: color.hex }}
+                          onClick={() => setAccentColor(color.hex)}
+                          aria-label={color.id}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="settings-cell wide">
+                    <label className="settings-label">{t('settingsFont')}</label>
+                    <select
+                      className="compact-select"
+                      value={selectedFont}
+                      onChange={(event) => setSelectedFont(event.target.value)}
+                    >
+                      {FONT_OPTIONS.map((fontOption) => (
+                        <option key={fontOption.family} value={fontOption.family}>
+                          {fontOption.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="settings-font-preview" style={{ fontFamily: `'${selectedFont}', system-ui, sans-serif` }}>
+                      <span className="settings-font-preview-title">{selectedFontOption?.name || selectedFont}</span>
+                      <span className="settings-font-preview-sample">Aa Bb 123</span>
+                    </div>
                   </div>
                 </div>
-                <div className="settings-cell wide">
-                  <label className="settings-label">{t('settingsAccentColor')}</label>
-                  <div className="accent-pills-row">
-                    {ACCENT_COLORS.map(c => (
-                      <button 
-                        key={c.id} 
-                        className={`accent-pill ${accentColor === c.hex ? 'active' : ''}`}
-                        style={{ background: c.hex }}
-                        onClick={() => setAccentColor(c.hex)}
-                      />
-                    ))}
+              </section>
+
+              <section className="settings-section-card settings-section-account-card">
+                <div className="settings-section-head">
+                  <div>
+                    <p className="settings-section-eyebrow">{t('settingsAccount')}</p>
+                    <h3 className="settings-card-title">{t('settingsAccount')}</h3>
+                    <p className="settings-card-description">{t('settingsAccountHint')}</p>
                   </div>
                 </div>
-                <div className="settings-cell wide">
-                  <label className="settings-label">{t('settingsFont')}</label>
-                  <select 
-                    className="compact-select" 
-                    value={selectedFont} 
-                    onChange={(e) => setSelectedFont(e.target.value)}
-                  >
-                    {FONT_OPTIONS.map(f => <option key={f.family} value={f.family}>{f.name}</option>)}
-                  </select>
+
+                <div className="settings-account-minimal">
+                  {authUser ? (
+                    <div className="settings-account-shell">
+                      <div className="settings-account-identity">
+                        <div className="mini-avatar settings-account-avatar">
+                          <UserRound size={18} />
+                        </div>
+
+                        <div className="settings-account-meta">
+                          <span className="settings-account-name">{settingsAccountName}</span>
+                          <span className="settings-account-subtitle">
+                            {t('settingsSignedInAs')} {authUser.username}
+                          </span>
+                        </div>
+
+                        <span className="settings-account-role-badge">{settingsAccountRole}</span>
+                      </div>
+
+                      <div className="settings-account-actions">
+                        <button
+                          type="button"
+                          className="action-btn manage with-text"
+                          onClick={() => {
+                            setShowSettings(false);
+                            setAccountTab('profile');
+                            if (canManageAccounts) {
+                              fetchUsersList();
+                            }
+                            setShowManageUsersModal(true);
+                          }}
+                        >
+                          <Settings size={14} />
+                          <span>{manageAccountsLabel}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="action-btn logout with-text"
+                          onClick={() => {
+                            setShowSettings(false);
+                            handleLogout();
+                          }}
+                        >
+                          <LogOut size={14} />
+                          <span>{t('btnLogout')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="settings-guest-card">
+                      <div className="settings-guest-copy">
+                        <span className="settings-account-name">{t('settingsGuestTitle')}</span>
+                        <span className="settings-account-subtitle">{t('settingsGuestHint')}</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="login-btn-minimal"
+                        onClick={() => {
+                          setShowSettings(false);
+                          setShowLoginModal(true);
+                        }}
+                      >
+                        <LogIn size={15} />
+                        <span>{t('btnLogin')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showMasterModal ? (
+        <div className="modal-overlay" style={{ zIndex: 10000, background: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(8px)' }}>
+          <div className="modal-content emerald-theme" style={{ 
+            maxWidth: '1200px', 
+            width: '95%', 
+            maxHeight: '90vh', 
+            display: 'flex', 
+            flexDirection: 'column',
+            padding: 0,
+            overflow: 'hidden',
+            borderRadius: '1.2rem',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            background: 'rgba(255, 255, 255, 0.95)'
+          }}>
+            <header className="modal-header" style={{ 
+                background: 'linear-gradient(135deg, var(--accent-primary) 0%, #059669 100%)', 
+                color: 'white', 
+                padding: '1.5rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+            }}>
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{t('masterTitle') || 'Quản lý Master Database'}</h2>
+                <p style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '0.2rem' }}>{t('masterSubtitle') || 'Source of Truth cho toàn bộ sản phẩm'}</p>
+              </div>
+              <button 
+                type="button" 
+                className="icon-button" 
+                onClick={() => setShowMasterModal(false)}
+                style={{ color: 'white', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', padding: '0.4rem' }}
+              >
+                <X size={20} />
+              </button>
+            </header>
+            
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem', padding: '1.5rem', overflow: 'hidden' }}>
+              <div className="master-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+                <div className="search-box" style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
+                  <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                  <input 
+                    type="text" 
+                    placeholder="Tìm kiếm theo SKU, Barcode, Tên, Ngành hàng..." 
+                    className="master-search-input"
+                    value={masterSearchInput}
+                    onChange={e => {
+                      setMasterSearchInput(e.target.value);
+                      setMasterPage(1);
+                    }}
+                    style={{ 
+                        width: '100%',
+                        padding: '0.75rem 1rem 0.75rem 2.8rem', 
+                        borderRadius: '0.8rem', 
+                        border: '1px solid #e2e8f0', 
+                        background: '#f8fafc', 
+                        fontSize: '0.95rem',
+                        transition: 'all 0.2s',
+                        outline: 'none'
+                    }}
+                  />
+                  {masterSearchInput && (
+                    <button 
+                      type="button"
+                      className="icon-button"
+                      onClick={() => {
+                          setMasterSearchInput('');
+                          setMasterSearchTerm('');
+                          setMasterPage(1);
+                      }}
+                      style={{ position: 'absolute', right: '0.8rem', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#94a3b8' }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.8rem' }}>
+                    <button
+                      className="primary-button"
+                      style={{ 
+                          background: isImportingMaster ? '#94a3b8' : 'var(--accent-primary)',
+                          padding: '0.75rem 1.25rem',
+                          fontSize: '0.9rem',
+                          borderRadius: '0.8rem',
+                          cursor: isImportingMaster ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          boxShadow: '0 4px 6px -1px rgba(16, 185, 129, 0.2)',
+                          color: 'white',
+                          border: 'none'
+                      }}
+                      onClick={() => masterImportRef.current?.click()}
+                      disabled={isImportingMaster}
+                    >
+                        {isImportingMaster ? <Loader size={18} className="animate-spin" /> : <FileUp size={18} />}
+                        {isImportingMaster ? t('btnUpdating') : t('btnImportMaster')}
+                    </button>
+                    <input type="file" ref={masterImportRef} hidden accept=".xlsx,.xls,.csv" onChange={handleMasterImportExcel} />
+
+                    <button className="secondary-button" onClick={exportMasterExcel} disabled={isExportingMaster} style={{
+                        padding: '0.75rem 1.25rem',
+                        fontSize: '0.9rem',
+                        borderRadius: '0.8rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        border: '1px solid #e2e8f0',
+                        background: 'white'
+                    }}>
+                         <Download size={18} />
+                         {isExportingMaster ? t('btnExporting') : t('btnExportMaster')}
+                    </button>
                 </div>
               </div>
 
-              <div className="settings-account-minimal">
-                {authUser ? (
-                  <div className="account-row-compact">
-                    <div className="user-mini-info">
-                      <div className="mini-avatar"><UserRound size={16} /></div>
-                      <div className="mini-meta">
-                        <span className="name">{authUser.displayName || authUser.username}</span>
-                        <span className="role">{t(authUser.role === 'admin' ? 'roleAdmin' : 'rolePicker')}</span>
-                      </div>
-                    </div>
-                    <div className="account-mini-actions">
-                      <button 
-                        className="action-btn manage with-text"
-                        onClick={() => {
-                          setShowSettings(false);
-                          setAccountTab('profile');
-                          if (authUser.role === 'admin') fetchUsersList();
-                          setShowManageUsersModal(true);
-                        }}
-                      >
-                        <Settings size={14} />
-                        <span>{t('accountCenterTitle')}</span>
-                      </button>
-                      <button className="action-btn logout with-text" onClick={() => { setShowSettings(false); handleLogout(); }}>
-                        <LogOut size={14} />
-                        <span>{t('btnLogout')}</span>
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button className="login-btn-minimal" onClick={() => { setShowSettings(false); setShowLoginModal(true); }}>
-                    <LogIn size={15} />
-                    <span>{t('btnLogin')}</span>
-                  </button>
-                )}
+              <div className="master-table-container" style={{ 
+                  flex: 1,
+                  overflowY: 'auto', 
+                  border: '1px solid #f1f5f9', 
+                  borderRadius: '1rem',
+                  background: 'white',
+                  boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.02)'
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left' }}>
+                  <thead style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 10 }}>
+                    <tr>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>SKU</th>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Barcode / ID</th>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>{t('productNameLabel') || 'Sản phẩm'}</th>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Div</th>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Div Name</th>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Dept</th>
+                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Dept Name</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const filtered = filteredMasterProducts;
+                      const displayRows = filtered.slice((masterPage - 1) * ITEMS_PER_MASTER_PAGE, masterPage * ITEMS_PER_MASTER_PAGE);
+                      
+                      return (
+                        <>
+                          {displayRows.map((p, idx) => (
+                            <tr key={`${p.sku}-${idx}`} className="master-row" style={{ 
+                                transition: 'background 0.2s',
+                                cursor: 'default'
+                            }}>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', borderBottom: '1px solid #f8fafc', fontWeight: 500, color: '#334155' }}>
+                                <code style={{ background: '#f1f5f9', padding: '0.2rem 0.4rem', borderRadius: '0.4rem', fontSize: '0.8rem', color: 'var(--accent-primary)' }}>{p.sku}</code>
+                              </td>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>{p.barcode}</td>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', borderBottom: '1px solid #f8fafc', fontWeight: 500 }}>
+                                {p.name}
+                              </td>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
+                                {p.division || '—'}
+                              </td>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
+                                {p.divisionName || '—'}
+                              </td>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
+                                {p.department || '—'}
+                              </td>
+                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
+                                {p.departmentName || '—'}
+                              </td>
+                            </tr>
+                          ))}
+                          {filtered.length === 0 && (
+                            <tr>
+                              <td colSpan="7" style={{ padding: '4rem', textAlign: 'center' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', color: '#94a3b8' }}>
+                                    <Search size={48} opacity={0.2} />
+                                    <p>Không tìm thấy sản phẩm nào phù hợp.</p>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </tbody>
+                </table>
               </div>
+              
+              <footer className="master-footer" style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap',
+                  justifyContent: 'space-between', 
+                  alignItems: 'center', 
+                  padding: '1rem 0.5rem',
+                  gap: '1rem',
+                  borderTop: '1px solid #f1f5f9'
+              }}>
+                  <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
+                    Tổng cộng: <strong>{masterProducts.length}</strong> | Tìm thấy: <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>{filteredMasterProducts.length}</span>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+                    <button 
+                      className="pagination-btn" 
+                      disabled={masterPage <= 1}
+                      onClick={() => setMasterPage(p => p - 1)}
+                      style={{
+                          padding: '0.5rem 1rem',
+                          borderRadius: '0.6rem',
+                          border: '1px solid #e2e8f0',
+                          background: masterPage <= 1 ? '#f8fafc' : 'white',
+                          cursor: masterPage <= 1 ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          fontSize: '0.9rem',
+                          color: masterPage <= 1 ? '#cbd5e1' : '#475569'
+                      }}
+                    >
+                      <ChevronLeft size={16} /> Trước
+                    </button>
+                    
+                    <span style={{ fontSize: '0.9rem', color: '#334155', fontWeight: 500 }}>
+                      Trang <span style={{ color: 'var(--accent-primary)' }}>{masterPage}</span> / {Math.max(1, Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE))}
+                    </span>
+                    
+                    <button 
+                      className="pagination-btn" 
+                      disabled={masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE)}
+                      onClick={() => setMasterPage(p => p + 1)}
+                      style={{
+                          padding: '0.5rem 1rem',
+                          borderRadius: '0.6rem',
+                          border: '1px solid #e2e8f0',
+                          background: masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE) ? '#f8fafc' : 'white',
+                          cursor: masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE) ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          fontSize: '0.9rem',
+                          color: masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE) ? '#cbd5e1' : '#475569'
+                      }}
+                    >
+                      Tiếp <ChevronRight size={16} />
+                    </button>
+                  </div>
+              </footer>
             </div>
           </div>
         </div>
