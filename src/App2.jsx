@@ -1,3 +1,4 @@
+// Picker Assistant - Version 2.0 (Optimized for Cloudflare)
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
