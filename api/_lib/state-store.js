@@ -232,9 +232,10 @@ function normalizeVisual(input) {
   };
 }
 
-function getKvConfig() {
-  const url = String(process.env.KV_REST_API_URL || '').trim();
-  const token = String(process.env.KV_REST_API_TOKEN || '').trim();
+function getKvConfig(env) {
+  const source = env || process.env || {};
+  const url = String(source.KV_REST_API_URL || '').trim();
+  const token = String(source.KV_REST_API_TOKEN || '').trim();
 
   if (!url || !token) {
     throw new Error('Missing Upstash KV environment variables.');
@@ -243,8 +244,8 @@ function getKvConfig() {
   return { url, token };
 }
 
-async function runKvCommand(command) {
-  const { url, token } = getKvConfig();
+async function runKvCommand(command, env) {
+  const { url, token } = getKvConfig(env);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
   let response;
@@ -276,10 +277,10 @@ async function runKvCommand(command) {
   return response.json();
 }
 
-async function readRawStateFromKv() {
+async function readRawStateFromKv(env) {
   const [sharedResult, masterResult] = await Promise.all([
-     runKvCommand(['GET', SHARED_STATE_KEY]),
-     runKvCommand(['GET', MASTER_STATE_KEY])
+     runKvCommand(['GET', SHARED_STATE_KEY], env),
+     runKvCommand(['GET', MASTER_STATE_KEY], env)
   ]);
   
   const rawShared = sharedResult?.result;
@@ -301,15 +302,15 @@ async function readRawStateFromKv() {
   }
 }
 
-async function writeRawStateToKv(payload) {
+async function writeRawStateToKv(payload, env) {
   const { masterProducts, ...shared } = payload;
   await Promise.all([
-    runKvCommand(['SET', SHARED_STATE_KEY, JSON.stringify(shared)]),
-    runKvCommand(['SET', MASTER_STATE_KEY, JSON.stringify(masterProducts || [])])
+    runKvCommand(['SET', SHARED_STATE_KEY, JSON.stringify(shared)], env),
+    runKvCommand(['SET', MASTER_STATE_KEY, JSON.stringify(masterProducts || [])], env)
   ]);
 }
 
-async function migrateLegacyVisuals(rawState) {
+async function migrateLegacyVisuals(rawState, env) {
   const legacyVisuals =
     rawState?.aisleVisuals && typeof rawState.aisleVisuals === 'object' ? rawState.aisleVisuals : {};
   const visualMeta = {};
@@ -324,7 +325,7 @@ async function migrateLegacyVisuals(rawState) {
       continue;
     }
 
-    await runKvCommand(['SET', getVisualStorageKey(key), JSON.stringify(normalizedVisual)]);
+    await runKvCommand(['SET', getVisualStorageKey(key), JSON.stringify(normalizedVisual)], env);
     const meta = buildVisualMeta(normalizedVisual);
 
     if (meta) {
@@ -338,17 +339,17 @@ async function migrateLegacyVisuals(rawState) {
     updatedAt: rawState?.updatedAt || new Date().toISOString(),
   });
 
-  await writeRawStateToKv(payload);
+  await writeRawStateToKv(payload, env);
   return payload;
 }
 
-async function ensureSharedState(includeMaster = true) {
-  const rawState = await readRawStateFromKv();
+async function ensureSharedState(includeMaster = true, env) {
+  const rawState = await readRawStateFromKv(env);
 
   let state;
   if (!rawState) {
     const initial = normalizeState(getInitialState());
-    await writeRawStateToKv(initial);
+    await writeRawStateToKv(initial, env);
     state = initial;
   } else {
     const hasLegacyVisualPayload = Object.values(rawState?.aisleVisuals || {}).some((value) => {
@@ -356,7 +357,7 @@ async function ensureSharedState(includeMaster = true) {
     });
 
     if (hasLegacyVisualPayload) {
-      state = await migrateLegacyVisuals(rawState);
+      state = await migrateLegacyVisuals(rawState, env);
     } else {
       state = normalizeState(rawState);
     }
@@ -368,12 +369,12 @@ async function ensureSharedState(includeMaster = true) {
   return state;
 }
 
-export async function readSharedState(includeMaster = true) {
-  return ensureSharedState(includeMaster);
+export async function readSharedState(includeMaster = true, env) {
+  return ensureSharedState(includeMaster, env);
 }
 
-export async function writeSharedState(nextState) {
-  const currentState = await ensureSharedState();
+export async function writeSharedState(nextState, env) {
+  const currentState = await ensureSharedState(true, env);
   const mergedVisuals = {
     ...currentState.aisleVisuals,
   };
@@ -384,7 +385,7 @@ export async function writeSharedState(nextState) {
     const normalizedVisual = normalizeVisual(value);
 
     if (normalizedVisual) {
-      await runKvCommand(['SET', getVisualStorageKey(key), JSON.stringify(normalizedVisual)]);
+      await runKvCommand(['SET', getVisualStorageKey(key), JSON.stringify(normalizedVisual)], env);
       const meta = buildVisualMeta(normalizedVisual);
 
       if (meta) {
@@ -417,12 +418,12 @@ export async function writeSharedState(nextState) {
     updatedAt: new Date().toISOString(),
   });
 
-  await writeRawStateToKv(payload);
+  await writeRawStateToKv(payload, env);
   return payload;
 }
 
-export async function readMasterProducts() {
-  const result = await runKvCommand(['GET', MASTER_STATE_KEY]);
+export async function readMasterProducts(env) {
+  const result = await runKvCommand(['GET', MASTER_STATE_KEY], env);
   const raw = result?.result;
   if (!raw) return [];
   try {
@@ -433,15 +434,15 @@ export async function readMasterProducts() {
   }
 }
 
-export async function readSharedVisual(key) {
+export async function readSharedVisual(key, env) {
   const safeKey = String(key || '').trim();
 
   if (!safeKey) {
     return null;
   }
 
-  await ensureSharedState();
-  const result = await runKvCommand(['GET', getVisualStorageKey(safeKey)]);
+  await ensureSharedState(true, env);
+  const result = await runKvCommand(['GET', getVisualStorageKey(safeKey)], env);
   const raw = result?.result;
 
   if (!raw) {
@@ -455,7 +456,7 @@ export async function readSharedVisual(key) {
   }
 }
 
-export async function writeSharedVisual(key, visual) {
+export async function writeSharedVisual(key, visual, env) {
   const safeKey = String(key || '').trim();
 
   if (!safeKey) {
@@ -471,9 +472,9 @@ export async function writeSharedVisual(key, visual) {
     throw new Error('Invalid visual payload.');
   }
 
-  await runKvCommand(['SET', getVisualStorageKey(safeKey), JSON.stringify(normalizedVisual)]);
+  await runKvCommand(['SET', getVisualStorageKey(safeKey), JSON.stringify(normalizedVisual)], env);
 
-  const currentState = await ensureSharedState();
+  const currentState = await ensureSharedState(true, env);
   const payload = normalizeState({
     ...currentState,
     updatedAt: new Date().toISOString(),
@@ -483,18 +484,6 @@ export async function writeSharedVisual(key, visual) {
     },
   });
 
-  await writeRawStateToKv(payload);
+  await writeRawStateToKv(payload, env);
   return normalizedVisual;
-}
-
-export async function readMasterProducts() {
-  const result = await runKvCommand(['GET', MASTER_STATE_KEY]);
-  const raw = result?.result;
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(String(raw));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
 }
