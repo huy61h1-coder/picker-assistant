@@ -342,28 +342,34 @@ async function migrateLegacyVisuals(rawState) {
   return payload;
 }
 
-async function ensureSharedState() {
+async function ensureSharedState(includeMaster = true) {
   const rawState = await readRawStateFromKv();
 
+  let state;
   if (!rawState) {
     const initial = normalizeState(getInitialState());
     await writeRawStateToKv(initial);
-    return initial;
+    state = initial;
+  } else {
+    const hasLegacyVisualPayload = Object.values(rawState?.aisleVisuals || {}).some((value) => {
+      return value && typeof value === 'object' && typeof value.src === 'string' && value.src.trim();
+    });
+
+    if (hasLegacyVisualPayload) {
+      state = await migrateLegacyVisuals(rawState);
+    } else {
+      state = normalizeState(rawState);
+    }
   }
 
-  const hasLegacyVisualPayload = Object.values(rawState?.aisleVisuals || {}).some((value) => {
-    return value && typeof value === 'object' && typeof value.src === 'string' && value.src.trim();
-  });
-
-  if (hasLegacyVisualPayload) {
-    return migrateLegacyVisuals(rawState);
+  if (!includeMaster) {
+    state.masterProducts = [];
   }
-
-  return normalizeState(rawState);
+  return state;
 }
 
-export async function readSharedState() {
-  return ensureSharedState();
+export async function readSharedState(includeMaster = true) {
+  return ensureSharedState(includeMaster);
 }
 
 export async function writeSharedState(nextState) {

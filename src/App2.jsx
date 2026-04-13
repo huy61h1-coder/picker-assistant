@@ -734,6 +734,8 @@ export default function App() {
   const [selectedFont, setSelectedFont] = useState(() => localStorage.getItem('appFont') || 'Nunito');
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('appAccentColor') || '#6366f1');
   const [showSettings, setShowSettings] = useState(false);
+  const [isMasterLoading, setIsMasterLoading] = useState(false);
+  const [hasLoadedMaster, setHasLoadedMaster] = useState(false);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -1530,11 +1532,7 @@ export default function App() {
             : {},
         );
         setLossAudits(Array.isArray(sharedState?.lossAudits) ? sharedState.lossAudits : []);
-        setMasterProducts(
-          Array.isArray(sharedState?.masterProducts)
-            ? dedupeMasterProducts(sharedState.masterProducts)
-            : [],
-        );
+        // Master Products are handled by loadMasterData on-demand
       } catch (error) {
         if (!active || silent) {
           return;
@@ -1556,6 +1554,32 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [authToken]);
+
+  useEffect(() => {
+    if ((!showMasterModal && !searchTerm && !lossSearchTerm && !checkStockSearchTerm) || hasLoadedMaster || isMasterLoading) {
+      return;
+    }
+
+    async function loadMasterData() {
+      setIsMasterLoading(true);
+      try {
+        const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
+        const response = await fetchJsonWithTimeout('/api/master', { headers });
+        
+        if (!response.ok) throw new Error('Failed to load master data');
+        
+        const products = await response.json();
+        setMasterProducts(Array.isArray(products) ? dedupeMasterProducts(products) : []);
+        setHasLoadedMaster(true);
+      } catch (error) {
+        setToast(buildToast('error', 'Không tải được dữ liệu Master.'));
+      } finally {
+        setIsMasterLoading(false);
+      }
+    }
+
+    loadMasterData();
+  }, [showMasterModal, searchTerm, lossSearchTerm, checkStockSearchTerm, hasLoadedMaster, authToken]);
 
   useEffect(() => {
     if (!selectedId) {

@@ -26,7 +26,8 @@ export default async function handler(request, response) {
 
   if (request.method === 'GET') {
     try {
-      const state = await readSharedState();
+      // Load only POG/Stock/Loss state, EXCLUDING the heavy master list
+      const state = await readSharedState(false); 
       sendJson(response, 200, state);
     } catch (error) {
       sendJson(response, 500, {

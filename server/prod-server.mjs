@@ -23,6 +23,7 @@ const apiRoutes = {
   '/api/admin/users': usersHandler,
   '/api/visual': visualHandler,
   '/api/health': healthHandler,
+  '/api/master': (await import('../api/master.js')).default,
 };
 
 const MIME_TYPES = {
@@ -37,20 +38,21 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gzip = promisify(zlib.gzip);
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
 
-  console.log(`[${new Date().toISOString()}] ${req.method} ${pathname}`);
-
   // Handle API
-  // Vercel can also have routes with query params, ensure we match correctly
   const apiHandler = apiRoutes[pathname];
   if (apiHandler) {
     try {
       await apiHandler(req, res);
     } catch (err) {
-      console.error('API Error:', err);
       res.statusCode = 500;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ error: 'Internal Server Error', message: err.message }));
@@ -67,7 +69,6 @@ const server = createServer(async (req, res) => {
       filePath = path.join(filePath, 'index.html');
     }
   } catch {
-    // SPA fallback: if it's not an API call and file doesn't exist, serve index.html
     if (!pathname.startsWith('/api/')) {
         filePath = path.join(distDir, 'index.html');
     } else {
@@ -79,9 +80,18 @@ const server = createServer(async (req, res) => {
   }
 
   try {
-    const content = await fs.readFile(filePath);
+    let content = await fs.readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
+    const acceptEncoding = req.headers['accept-encoding'] || '';
+
     res.setHeader('Content-Type', MIME_TYPES[ext] || 'application/octet-stream');
+    
+    // Gzip compression for assets larger than 2KB
+    if (acceptEncoding.includes('gzip') && content.length > 2048) {
+      content = await gzip(content);
+      res.setHeader('Content-Encoding', 'gzip');
+    }
+
     res.end(content);
   } catch (err) {
     res.statusCode = 404;
