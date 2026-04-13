@@ -107,10 +107,10 @@ const MASTER_IMPORT_FIELD_MATCHERS = {
   name: [/ten.*sp/, /ten.*hang/, /prod.*name/, /item.*name/, /desc/, /mo ?ta/, /hoten/, /acc.*name/, /dien.*giai/, /ten/, /sp/, /thietbi/],
   barcode: [/barcode/, /ma.*vach/, /ean/, /upc/, /qr/, /scan/, /aeon/, /item.*id/, /art.*id/, /sap/, /internal.*id/, /id/, /uuid/, /gtin/, /prod.*id/, /serial/],
   sku: [/item.*code/, /item.*no/, /prod.*code/, /ma.*sp/, /ma.*hang/, /thanh.*pham/, /part.*no/, /material/, /vattu/, /sku/, /code/, /ma/],
-  division: [/div.*cd/, /ma.*div/, /ma.*nganh/, /div.*id/, /dept.*cd/, /madiv/, /manganh/, /div/, /nganh/],
-  divisionName: [/div.*name/, /ten.*div/, /ten.*nganh/, /div.*desc/, /nganh.*hang/, /category/, /cat/],
-  department: [/dept.*cd/, /ma.*dept/, /ma.*nhom/, /sub.*dept.*cd/, /madept/, /manhom/, /dept/, /nhom/],
-  departmentName: [/dept.*name/, /ten.*dept/, /ten.*nhom/, /sub.*desc/, /nhom.*hang/, /department/, /subcat/],
+  division: [/^div$/, /div.*cd/, /ma.*div/, /ma.*nganh/, /div.*id/, /dept.*cd/, /madiv/, /manganh/, /div/, /nganh/, /ma.*nganh/],
+  divisionName: [/div.*name/, /ten.*div/, /ten.*nganh/, /div.*desc/, /nganh.*hang/, /category/, /cat/, /ten.*nganh/],
+  department: [/^dept$/, /dept.*cd/, /ma.*dept/, /ma.*nhom/, /sub.*dept.*cd/, /madept/, /manhom/, /dept/, /nhom/, /ma.*nhom/],
+  departmentName: [/dept.*name/, /ten.*dept/, /ten.*nhom/, /sub.*desc/, /nhom.*hang/, /department/, /subcat/, /ten.*nhom/],
 };
 
 function cleanMasterText(value) {
@@ -3508,10 +3508,14 @@ export default function App() {
                           <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
                             Line {product.lineKey} | {product.locId}
                           </span>
-                          <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
+                        <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
                             SKU: {product.sku || '--'}
                           </span>
                         </div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                             <Tag size={12} />
+                             {masterInfo?.division || '-'} {masterInfo?.department ? `> ${masterInfo.department}` : ''}
+                           </div>
                       </div>
                       <span className={`stock-summary-pill stock-summary-pill-${stockMeta.tone}`} style={{ flexShrink: 0 }}>
                         <CheckCircle2 size={12} style={{marginRight: '0.3rem'}} />
@@ -3521,11 +3525,6 @@ export default function App() {
 
                     <div style={{ display: 'flex', width: '100%', gap: '1rem', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.8rem', borderTop: '1px solid #f8fafc' }}>
                        <div style={{ flex: 1 }}>
-                         {(masterInfo?.division || masterInfo?.department) && (
-                           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: 0 }}>
-                             {masterInfo.division} {masterInfo.department ? `› ${masterInfo.department}` : ''}
-                           </p>
-                         )}
                          <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>Barcode: {product.barcodeView || '--'}</p>
                        </div>
                        
@@ -5156,16 +5155,16 @@ export default function App() {
                                 {p.name}
                               </td>
                               <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.division || '—'}
+                                {p.division || '-'}
                               </td>
                               <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.divisionName || '—'}
+                                {p.divisionName || '-'}
                               </td>
                               <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.department || '—'}
+                                {p.department || '-'}
                               </td>
                               <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.departmentName || '—'}
+                                {p.departmentName || '-'}
                               </td>
                             </tr>
                           ))}
