@@ -15,4 +15,4 @@
   status = 200
 
 [functions]
-  node_bundle = true
+  node_bundler = "esbuild"
