@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,6 +10,7 @@ const workspaceRoot = path.resolve(__dirname, '..');
 const dataDir = path.join(workspaceRoot, 'shared-data');
 const dataFile = path.join(dataDir, 'store.json');
 const usersFile = path.join(dataDir, 'users.json');
+const masterFile = path.join(dataDir, 'master.json');
 const visualsDir = path.join(dataDir, 'visuals');
 const port = 4174;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 16;
@@ -19,6 +21,9 @@ function hashPassword(value) {
     .update(String(value || ''))
     .digest('hex');
 }
+
+let masterCache = null;
+let lastMasterUpdate = new Date().toISOString();
 
 function sanitizeUser(user) {
   return {
@@ -72,12 +77,22 @@ const initialUsers = [
   },
 ];
 
-function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, {
+function sendJson(response, statusCode, payload, compress = false) {
+  const json = JSON.stringify(payload);
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-  });
-  response.end(JSON.stringify(payload));
+  };
+
+  if (compress) {
+    const compressed = gzipSync(json);
+    headers['Content-Encoding'] = 'gzip';
+    response.writeHead(statusCode, headers);
+    response.end(compressed);
+  } else {
+    response.writeHead(statusCode, headers);
+    response.end(json);
+  }
 }
 
 function getVisualFilePath(key) {
@@ -160,9 +175,19 @@ function buildVisualMeta(visual) {
 }
 
 function normalizeMasterCode(value) {
-  return String(value || '')
-    .replace(/\s/g, '')
-    .trim();
+  let valStr = String(value || '').replace(/\s/g, '').trim();
+  // Fix scientific notation for large barcodes (e.g. 8.93E+12, 8E12, 8.9e+12)
+  if (/^[0-9](\.[0-9]+)?E\+?[0-9]+$/i.test(valStr)) {
+    try {
+      const num = Number(valStr);
+      if (!Number.isNaN(num) && Number.isFinite(num)) {
+        valStr = BigInt(Math.round(num)).toString();
+      }
+    } catch (e) {
+      try { valStr = Number(valStr).toFixed(0); } catch (e2) {}
+    }
+  }
+  return valStr;
 }
 
 function normalizeMasterName(value) {
@@ -191,15 +216,25 @@ function normalizeMasterProduct(product) {
   const primaryCode = sku || barcode || productId;
   const name = normalizeMasterName(product?.name);
 
+  // Preserve division and department fields
+  const division = String(product?.division || '').trim();
+  const divisionName = String(product?.divisionName || '').trim();
+  const department = String(product?.department || '').trim();
+  const departmentName = String(product?.departmentName || '').trim();
+
   if (!primaryCode) {
     return null;
   }
 
   return {
     sku: sku || primaryCode,
-    barcode: barcode || productId || sku || primaryCode,
-    productId: productId || barcode || sku || primaryCode,
+    barcode: barcode || productId || '',
+    productId: productId || barcode || '',
     name,
+    division,
+    divisionName,
+    department,
+    departmentName,
   };
 }
 
@@ -207,80 +242,80 @@ function pickPreferredMasterCode(currentValue, nextValue) {
   const currentCode = normalizeMasterCode(currentValue);
   const nextCode = normalizeMasterCode(nextValue);
 
-  if (!currentCode) {
-    return nextCode;
-  }
-
-  if (!nextCode) {
-    return currentCode;
-  }
-
-  return nextCode.length > currentCode.length ? nextCode : currentCode;
+  // Lấy theo giá trị mới nếu có, ngược lại giữ cũ
+  return nextCode || currentCode;
 }
 
 function pickPreferredMasterName(currentValue, nextValue) {
   const currentName = normalizeMasterName(currentValue);
   const nextName = normalizeMasterName(nextValue);
 
-  if (!currentName) {
-    return nextName;
-  }
-
-  if (!nextName) {
-    return currentName;
-  }
-
-  return nextName.length > currentName.length ? nextName : currentName;
+  // Ưu tiên hoàn toàn giá trị mới từ file vừa upload
+  return nextName || currentName;
 }
 
 function mergeMasterProducts(products) {
+  if (!Array.isArray(products) || products.length === 0) return [];
+
   const mergedProducts = [];
   const keyToIndex = new Map();
 
-  (products || []).forEach((product) => {
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i];
     const normalizedProduct = normalizeMasterProduct(product);
 
     if (!normalizedProduct) {
-      return;
+      continue;
     }
 
-    const matchingKey = buildMasterKeys(normalizedProduct).find((key) => keyToIndex.has(key));
+    const keys = buildMasterKeys(normalizedProduct);
+    let matchedIndex = -1;
+    
+    for (let k = 0; k < keys.length; k++) {
+      if (keyToIndex.has(keys[k])) {
+        matchedIndex = keyToIndex.get(keys[k]);
+        break;
+      }
+    }
 
-    if (matchingKey) {
-      const matchedIndex = keyToIndex.get(matchingKey);
+    if (matchedIndex !== -1) {
       const currentProduct = mergedProducts[matchedIndex];
-      mergedProducts[matchedIndex] = normalizeMasterProduct({
-        sku: pickPreferredMasterCode(currentProduct?.sku, normalizedProduct?.sku),
-        barcode: pickPreferredMasterCode(currentProduct?.barcode, normalizedProduct?.barcode),
-        productId: pickPreferredMasterCode(currentProduct?.productId, normalizedProduct?.productId),
-        name: pickPreferredMasterName(currentProduct?.name, normalizedProduct?.name),
-      });
-      buildMasterKeys(mergedProducts[matchedIndex]).forEach((key) => {
-        keyToIndex.set(key, matchedIndex);
-      });
-      return;
+      const merged = {
+        ...normalizedProduct,
+        sku: normalizedProduct.sku || currentProduct.sku,
+        barcode: normalizedProduct.barcode || currentProduct.barcode,
+        productId: normalizedProduct.productId || currentProduct.productId,
+        name: normalizedProduct.name || currentProduct.name,
+      };
+      mergedProducts[matchedIndex] = merged;
+      for (let k = 0; k < keys.length; k++) {
+        keyToIndex.set(keys[k], matchedIndex);
+      }
+    } else {
+      const nextIndex = mergedProducts.length;
+      mergedProducts.push(normalizedProduct);
+      for (let k = 0; k < keys.length; k++) {
+        keyToIndex.set(keys[k], nextIndex);
+      }
     }
+  }
 
-    const nextIndex = mergedProducts.push(normalizedProduct) - 1;
-    buildMasterKeys(normalizedProduct).forEach((key) => {
-      keyToIndex.set(key, nextIndex);
-    });
+  // To optimize sorting of 10k+ items, we avoid repetitive normalization and string creation
+  const sortItems = mergedProducts.map(p => {
+    const code = p.sku || p.barcode || p.productId || '';
+    return {
+      p,
+      sortKey: `${p.name || ''}|${code}`.toLowerCase()
+    };
   });
 
-  return mergedProducts.sort((leftProduct, rightProduct) => {
-    const leftLabel = `${leftProduct?.name || ''}|${leftProduct?.sku || leftProduct?.barcode || leftProduct?.productId || ''}`.toLowerCase();
-    const rightLabel = `${rightProduct?.name || ''}|${rightProduct?.sku || rightProduct?.barcode || rightProduct?.productId || ''}`.toLowerCase();
-
-    if (leftLabel < rightLabel) {
-      return -1;
-    }
-
-    if (leftLabel > rightLabel) {
-      return 1;
-    }
-
+  sortItems.sort((a, b) => {
+    if (a.sortKey < b.sortKey) return -1;
+    if (a.sortKey > b.sortKey) return 1;
     return 0;
   });
+
+  return sortItems.map(item => item.p);
 }
 
 function normalizeStatePayload(input) {
@@ -303,9 +338,55 @@ function normalizeStatePayload(input) {
       input?.aisleNames && typeof input.aisleNames === 'object' ? input.aisleNames : {},
     lossAudits: Array.isArray(input?.lossAudits) ? input.lossAudits : [],
     stockChecks: Array.isArray(input?.stockChecks) ? input.stockChecks : [],
-    masterProducts: mergeMasterProducts(input?.masterProducts),
+    masterProducts: [], // Always return empty here, managed via readMaster
     updatedAt: input?.updatedAt || new Date().toISOString(),
   };
+}
+
+async function readMaster() {
+  if (masterCache) {
+    return masterCache;
+  }
+
+  try {
+    const raw = await fs.readFile(masterFile, 'utf8');
+    masterCache = JSON.parse(raw);
+    return masterCache;
+  } catch {
+    masterCache = [];
+    return masterCache;
+  }
+}
+
+async function writeMaster(products) {
+  const normalized = mergeMasterProducts(products);
+  masterCache = normalized;
+  lastMasterUpdate = new Date().toISOString();
+  await fs.writeFile(masterFile, JSON.stringify(normalized, null, 2), 'utf8');
+  return normalized;
+}
+
+async function ensureMasterFile() {
+  await fs.mkdir(dataDir, { recursive: true });
+  try {
+    await fs.access(masterFile);
+    await readMaster();
+  } catch {
+    try {
+      const raw = await fs.readFile(dataFile, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed?.masterProducts) && parsed.masterProducts.length > 0) {
+        console.log(`Migrating ${parsed.masterProducts.length} master products to master.json...`);
+        await writeMaster(parsed.masterProducts);
+      } else {
+        await fs.writeFile(masterFile, JSON.stringify([], null, 2), 'utf8');
+        masterCache = [];
+      }
+    } catch {
+      await fs.writeFile(masterFile, JSON.stringify([], null, 2), 'utf8');
+      masterCache = [];
+    }
+  }
 }
 
 async function ensureStoreFile() {
@@ -421,7 +502,10 @@ async function readState() {
       return migrateLegacyVisuals(parsed);
     }
 
-    return normalizeStatePayload(parsed);
+    const nextState = normalizeStatePayload(parsed);
+    // Include master products from separated file for full state requests
+    nextState.masterProducts = await readMaster();
+    return nextState;
   } catch {
     const safeInitialState = normalizeStatePayload(initialState);
     await fs.writeFile(dataFile, JSON.stringify(safeInitialState, null, 2), 'utf8');
@@ -462,6 +546,10 @@ async function writeState(nextState) {
     }
   }
 
+  if (Array.isArray(nextState?.masterProducts)) {
+    await writeMaster(nextState.masterProducts);
+  }
+
   const payload = normalizeStatePayload({
     ...currentState,
     ...nextState,
@@ -470,6 +558,9 @@ async function writeState(nextState) {
   });
 
   await fs.writeFile(dataFile, JSON.stringify(payload, null, 2), 'utf8');
+
+  // Re-attach master products for the returned object so frontend state stays in sync
+  payload.masterProducts = await readMaster();
   return payload;
 }
 
@@ -516,7 +607,7 @@ async function readRequestBody(request) {
     const chunks = [];
     const timeoutId = setTimeout(() => {
       reject(new Error('Request body read timeout'));
-    }, 60000);
+    }, 300000); // 5 minutes for heavy excel files
 
     request.on('data', (chunk) => {
       chunks.push(chunk);
@@ -687,6 +778,18 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (pathname === '/api/master' && request.method === 'GET') {
+    const products = await readMaster();
+    // Use compression for large master data
+    sendJson(response, 200, products, true);
+    return;
+  }
+
+  if (pathname === '/api/master-info' && request.method === 'GET') {
+    sendJson(response, 200, { updatedAt: lastMasterUpdate });
+    return;
+  }
+
   if (pathname === '/api/state' && request.method === 'PUT') {
     const auth = requireSession(request, response);
 
@@ -752,6 +855,7 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, '127.0.0.1', async () => {
   await ensureStoreFile();
+  await ensureMasterFile();
   await ensureUsersFile();
   console.log(`Shared state API ready on http://127.0.0.1:${port}`);
 });

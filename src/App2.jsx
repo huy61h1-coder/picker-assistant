@@ -10,6 +10,7 @@ import {
   Database,
   Download,
   FileUp,
+  Hash,
   History,
   Image as ImageIcon,
   LayoutGrid,
@@ -20,6 +21,7 @@ import {
   PackageSearch,
   PackageX,
   Search,
+  SearchX,
   Settings,
   Trash2,
   Sparkles,
@@ -37,6 +39,7 @@ import {
   ChevronRight,
   Loader,
   UploadCloud,
+  Tag,
 } from 'lucide-react';
 
 import { translations, FONT_OPTIONS } from './translations';
@@ -104,13 +107,37 @@ function normaliseProductCode(value) {
 }
 
 const MASTER_IMPORT_FIELD_MATCHERS = {
-  name: [/ten.*sp/, /ten.*hang/, /prod.*name/, /item.*name/, /desc/, /mo ?ta/, /hoten/, /acc.*name/, /dien.*giai/, /ten/, /sp/, /thietbi/],
-  barcode: [/barcode/, /ma.*vach/, /ean/, /upc/, /qr/, /scan/, /aeon/, /item.*id/, /art.*id/, /sap/, /internal.*id/, /id/, /uuid/, /gtin/, /prod.*id/, /serial/],
-  sku: [/item.*code/, /item.*no/, /prod.*code/, /ma.*sp/, /ma.*hang/, /thanh.*pham/, /part.*no/, /material/, /vattu/, /sku/, /code/, /ma/],
-  division: [/^div$/, /div.*cd/, /ma.*div/, /ma.*nganh/, /div.*id/, /dept.*cd/, /madiv/, /manganh/, /div/, /nganh/, /ma.*nganh/],
-  divisionName: [/div.*name/, /ten.*div/, /ten.*nganh/, /div.*desc/, /nganh.*hang/, /category/, /cat/, /ten.*nganh/],
-  department: [/^dept$/, /dept.*cd/, /ma.*dept/, /ma.*nhom/, /sub.*dept.*cd/, /madept/, /manhom/, /dept/, /nhom/, /ma.*nhom/],
-  departmentName: [/dept.*name/, /ten.*dept/, /ten.*nhom/, /sub.*desc/, /nhom.*hang/, /department/, /subcat/, /ten.*nhom/],
+  name: [
+    /ten.*sp/, /ten.*hang/, /product.*name/, /item.*name/, /description/, /desc/, /mo ?ta/, 
+    /dien.*giai/, /ten.*ba/, /thiet.*bi/, /product/, /display.*name/, /sub.*desc/, /item.*desc/,
+    /ten/, /sp/, /name/, /ho.*ten/
+  ],
+  barcode: [
+    /supplier.*barcode/, /supp.*barcode/, /barcode/, /ma.*vach/, /ean/, /upc/, /qr/, /scan/, 
+    /ma.*vach.*sp/, /plu/, /gtin/, /^bc$/, /so.*ma/, /ma.*barcode/, /item.*upc/, /ean.*code/,
+    /mbarcode/, /sbarcode/, /vendor.*barcode/, /ean.*13/, /upc.*a/, /barcode.*1/, /code.*vach/
+  ],
+  sku: [
+    /item.*code/, /item.*no/, /prod.*code/, /ma.*sp/, /ma.*hang/, /^sku$/, /^code$/, /ma.*hang.*hoa/,
+    /masp/, /item.*id/, /art.*id/, /sap/, /internal.*id/, /^id$/, /article/, /prod.*id/, /uuid/, /serial/, 
+    /ma.*phu/, /aeon/, /vattu/, /material/, /part.*no/, /maut/
+  ],
+  division: [
+    /div.*cd/, /ma.*div/, /ma.*nganh/, /div.*id/, /madiv/, /manganh/, /ma.*nganh.*hang/, 
+    /ma.*phong/, /div.*code/, /^div$/
+  ],
+  divisionName: [
+    /div.*name/, /ten.*div/, /ten.*nganh/, /div.*desc/, /nganh.*hang/, /category/, /cat/, 
+    /division/, /ten.*phong/, /nganh/, /l1/
+  ],
+  department: [
+    /dept.*cd/, /ma.*dept/, /ma.*nhom/, /sub.*dept.*cd/, /madept/, /manhom/, /ma.*dept.*id/, 
+    /ma.*nhom.*hang/, /dept.*code/, /^dept$/
+  ],
+  departmentName: [
+    /dept.*name/, /ten.*dept/, /ten.*nhom/, /sub.*desc/, /nhom.*hang/, /department/, 
+    /phan.*loai/, /ten.*nhom.*hang/, /sub.*cat/, /l2/
+  ],
 };
 
 function cleanMasterText(value) {
@@ -120,10 +147,90 @@ function cleanMasterText(value) {
     .trim();
 }
 
+/** IndexedDB Helpers for Master Data Persistence */
+const IDB_DB_NAME = 'PickerAssistantDB';
+const IDB_STORE = 'MasterData';
+
+async function idbGetMaster() {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DB_NAME, 3);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      request.onsuccess = (e) => {
+        const db = e.target.result;
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const store = tx.objectStore(IDB_STORE);
+        const getReq = store.get('cache');
+        getReq.onsuccess = () => resolve(getReq.result || null);
+        getReq.onerror = () => resolve(null);
+      };
+      request.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+
+async function idbGetMasterMeta() {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DB_NAME, 3);
+      request.onsuccess = (e) => {
+        const db = e.target.result;
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const store = tx.objectStore(IDB_STORE);
+        const getReq = store.get('meta');
+        getReq.onsuccess = () => resolve(getReq.result || null);
+        getReq.onerror = () => resolve(null);
+      };
+      request.onerror = () => resolve(null);
+    } catch { resolve(null); }
+  });
+}
+
+async function idbSetMaster(data, meta) {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DB_NAME, 3);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      request.onsuccess = (e) => {
+        const db = e.target.result;
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        const store = tx.objectStore(IDB_STORE);
+        if (data) store.put(data, 'cache');
+        if (meta) store.put(meta, 'meta');
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      };
+      request.onerror = () => resolve(false);
+    } catch { resolve(false); }
+  });
+}
+
 function cleanMasterCode(value) {
-  return String(value || '')
-    .replace(/\s/g, '')
-    .trim();
+  let valStr = String(value || '').replace(/\s/g, '').trim();
+  // Fix scientific notation for large barcodes (e.g. 8.93E+12, 8E12, 8.9e+12)
+  if (/^[0-9](\.[0-9]+)?E\+?[0-9]+$/i.test(valStr)) {
+     try {
+       const num = Number(valStr);
+       if (!Number.isNaN(num) && Number.isFinite(num)) {
+         valStr = BigInt(Math.round(num)).toString();
+       }
+     } catch(e) {
+       try {
+         valStr = Number(valStr).toFixed(0);
+       } catch(e2) {}
+     }
+  }
+  return valStr;
 }
 
 function buildMasterLookupKeys(product) {
@@ -144,10 +251,13 @@ function normaliseMasterProduct(product) {
   );
   const barcode = cleanMasterCode(
     product?.barcode || product?.barCode || product?.ean || product?.upc || product?.qr ||
-    product?.productId || product?.itemId || product?.articleId || product?.aeonCode || product?.internalId
+    product?.aeonCode || product?.internalId
+  );
+  const productId = cleanMasterCode(
+    product?.productId || product?.articleId || product?.itemId || product?.id
   );
   
-  const primaryCode = sku || barcode;
+  const primaryCode = sku || barcode || productId;
   const name = cleanMasterText(product?.name || product?.productName || product?.description);
 
   const division = cleanMasterText(product?.division || product?.divisionCd || product?.madivision || product?.manganh);
@@ -161,43 +271,29 @@ function normaliseMasterProduct(product) {
 
   return {
     sku: sku || primaryCode,
-    barcode: barcode || sku || primaryCode,
-    name,
-    division,
-    divisionName,
-    department,
-    departmentName,
+    barcode: barcode || productId || '',
+    productId: productId || barcode || '',
+    name: name || 'Sản phẩm không tên',
+    division: division || '',
+    divisionName: divisionName || '',
+    department: department || '',
+    departmentName: departmentName || '',
+    searchLabel: `${sku} ${barcode} ${productId} ${name} ${division} ${divisionName} ${department} ${departmentName}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   };
 }
 
 function pickPreferredMasterText(currentValue, nextValue) {
   const currentText = cleanMasterText(currentValue);
   const nextText = cleanMasterText(nextValue);
-
-  if (!currentText) {
-    return nextText;
-  }
-
-  if (!nextText) {
-    return currentText;
-  }
-
-  return nextText.length > currentText.length ? nextText : currentText;
+  // Ưu tiên dữ liệu mới từ file
+  return nextText || currentText;
 }
 
 function pickPreferredMasterCode(currentValue, nextValue) {
   const currentCode = cleanMasterCode(currentValue);
   const nextCode = cleanMasterCode(nextValue);
-
-  if (!currentCode) {
-    return nextCode;
-  }
-
-  if (!nextCode) {
-    return currentCode;
-  }
-
-  return nextCode.length > currentCode.length ? nextCode : currentCode;
+  // Ưu tiên dữ liệu mới từ file
+  return nextCode || currentCode;
 }
 
 function mergeMasterProductEntries(currentProduct, nextProduct) {
@@ -213,18 +309,15 @@ function mergeMasterProductEntries(currentProduct, nextProduct) {
 }
 
 function dedupeMasterProducts(products) {
-  if (!products || products.length === 0) return [];
+  if (!Array.isArray(products) || products.length === 0) return [];
   
   const mergedProducts = [];
   const keyToIndex = new Map();
 
-  for (let i = 0; i < products.length; i++) {
+  for (let i = 0, len = products.length; i < len; i++) {
     const product = products[i];
-    const normalizedProduct = normaliseMasterProduct(product);
-    if (!normalizedProduct) continue;
-
-    const skuKey = normaliseProductCode(normalizedProduct.sku);
-    const barcodeKey = normaliseProductCode(normalizedProduct.barcode);
+    const skuKey = product.sku ? normaliseProductCode(product.sku) : '';
+    const barcodeKey = product.barcode ? normaliseProductCode(product.barcode) : '';
     
     let matchedIndex = -1;
     if (skuKey && keyToIndex.has(skuKey)) {
@@ -234,23 +327,26 @@ function dedupeMasterProducts(products) {
     }
 
     if (matchedIndex !== -1) {
-      mergedProducts[matchedIndex] = mergeMasterProductEntries(
-        mergedProducts[matchedIndex],
-        normalizedProduct,
-      );
-      // Ensure both keys are mapped to this index
+      const current = mergedProducts[matchedIndex];
+      // Faster merge
+      current.sku = product.sku || current.sku;
+      current.barcode = product.barcode || current.barcode;
+      current.name = product.name || current.name;
+      current.division = product.division || current.division;
+      current.divisionName = product.divisionName || current.divisionName;
+      current.department = product.department || current.department;
+      current.departmentName = product.departmentName || current.departmentName;
+      
       if (skuKey) keyToIndex.set(skuKey, matchedIndex);
       if (barcodeKey) keyToIndex.set(barcodeKey, matchedIndex);
     } else {
-      const nextIndex = mergedProducts.push(normalizedProduct) - 1;
+      const nextIndex = mergedProducts.length;
+      mergedProducts.push(product);
       if (skuKey) keyToIndex.set(skuKey, nextIndex);
       if (barcodeKey) keyToIndex.set(barcodeKey, nextIndex);
     }
   }
 
-  // Remove the expensive sort on 50k items. 
-  // We can sort by name once if needed, but for bulk import it's better to stay fast.
-  // If we really want it sorted, use a simpler sort that doesn't normalise every time.
   return mergedProducts;
 }
 
@@ -260,17 +356,19 @@ function normaliseMasterHeader(value) {
 
 function detectMasterFieldType(headerValue) {
   const normalizedHeader = normaliseMasterHeader(headerValue);
+  if (!normalizedHeader) return null;
 
-  if (!normalizedHeader) {
-    return '';
+  const fieldOrder = ['barcode', 'sku', 'name', 'division', 'divisionName', 'department', 'departmentName'];
+  
+  for (const field of fieldOrder) {
+    const matchers = MASTER_IMPORT_FIELD_MATCHERS[field];
+    for (let priority = 0; priority < matchers.length; priority++) {
+      if (matchers[priority].test(normalizedHeader)) {
+        return { field, priority };
+      }
+    }
   }
-
-  const fieldOrder = ['name', 'barcode', 'sku', 'divisionName', 'division', 'departmentName', 'department'];
-  const matchedField = fieldOrder.find((field) => {
-    return MASTER_IMPORT_FIELD_MATCHERS[field].some((pattern) => pattern.test(normalizedHeader));
-  });
-
-  return matchedField || '';
+  return null;
 }
 
 function detectMasterHeaderConfig(rows) {
@@ -283,14 +381,25 @@ function detectMasterHeaderConfig(rows) {
 
     const columns = {};
     row.forEach((cellValue, cellIndex) => {
-      const fieldType = detectMasterFieldType(cellValue);
-      if (fieldType && !Number.isInteger(columns[fieldType])) {
-        columns[fieldType] = cellIndex;
+      const match = detectMasterFieldType(cellValue);
+      if (match) {
+        const { field, priority } = match;
+        // If we haven't found this field yet, or we found a higher-priority match (lower priority number)
+        if (columns[field] === undefined || priority < columns[field].priority) {
+          columns[field] = { index: cellIndex, priority };
+        }
       }
     });
 
-    const matchedFields = Object.keys(columns);
-    const hasCodeColumn = ['sku', 'barcode', 'productId'].some((field) => Number.isInteger(columns[field]));
+    // Convert back to simple index for core logic, but keep the columns structure
+    const finalColumns = {};
+    Object.keys(columns).forEach(key => {
+      finalColumns[key] = columns[key].index;
+    });
+    
+    // Use finalColumns for the rest of validation in this loop
+    const matchedFields = Object.keys(finalColumns);
+    const hasCodeColumn = ['sku', 'barcode'].some((field) => Number.isInteger(finalColumns[field]));
 
     if (!hasCodeColumn || matchedFields.length < 2) {
       continue;
@@ -301,7 +410,7 @@ function detectMasterHeaderConfig(rows) {
     if (!bestConfig || score > bestConfig.score) {
       bestConfig = {
         headerRowIndex: rowIndex,
-        columns,
+        columns: finalColumns,
         score,
       };
     }
@@ -313,7 +422,8 @@ function detectMasterHeaderConfig(rows) {
 }
 
 function extractMasterProductsFromWorkbook(workbook, XLSX) {
-  const collectedProducts = [];
+  const mergedProducts = [];
+  const keyToIndex = new Map();
   let detectedColumnsInfo = '';
 
   (workbook?.SheetNames || []).forEach((sheetName) => {
@@ -326,34 +436,62 @@ function extractMasterProductsFromWorkbook(workbook, XLSX) {
     if (!headerConfig) return;
 
     const foundFields = Object.keys(headerConfig.columns);
-    console.log(`[Import] Found headers in "${sheetName}":`, foundFields);
+    console.log(`[Import] Found headers in "${sheetName}":`, headerConfig.columns);
     
     if (!detectedColumnsInfo) {
        detectedColumnsInfo = `Các cột tìm thấy: ${foundFields.join(', ')}`;
     }
 
-    rows.slice(headerConfig.headerRowIndex + 1).forEach((row) => {
-      const safeRow = Array.isArray(row) ? row : [];
-      if (safeRow.length === 0) return;
+    const { columns, headerRowIndex } = headerConfig;
+
+    for (let i = headerRowIndex + 1, len = rows.length; i < len; i++) {
+      const row = rows[i];
+      if (!Array.isArray(row) || row.length === 0) continue;
 
       const normalizedProduct = normaliseMasterProduct({
-        sku: Number.isInteger(headerConfig.columns.sku) ? safeRow[headerConfig.columns.sku] : '',
-        barcode: Number.isInteger(headerConfig.columns.barcode) ? safeRow[headerConfig.columns.barcode] : '',
-        name: Number.isInteger(headerConfig.columns.name) ? safeRow[headerConfig.columns.name] : '',
-        division: Number.isInteger(headerConfig.columns.division) ? safeRow[headerConfig.columns.division] : '',
-        divisionName: Number.isInteger(headerConfig.columns.divisionName) ? safeRow[headerConfig.columns.divisionName] : '',
-        department: Number.isInteger(headerConfig.columns.department) ? safeRow[headerConfig.columns.department] : '',
-        departmentName: Number.isInteger(headerConfig.columns.departmentName) ? safeRow[headerConfig.columns.departmentName] : '',
+        sku: columns.sku !== undefined ? row[columns.sku] : '',
+        barcode: columns.barcode !== undefined ? row[columns.barcode] : '',
+        name: columns.name !== undefined ? row[columns.name] : '',
+        division: columns.division !== undefined ? row[columns.division] : '',
+        divisionName: columns.divisionName !== undefined ? row[columns.divisionName] : '',
+        department: columns.department !== undefined ? row[columns.department] : '',
+        departmentName: columns.departmentName !== undefined ? row[columns.departmentName] : '',
       });
 
-      if (normalizedProduct) {
-        collectedProducts.push(normalizedProduct);
+      if (!normalizedProduct) continue;
+
+      const skuKey = normaliseProductCode(normalizedProduct.sku);
+      const barcodeKey = normaliseProductCode(normalizedProduct.barcode);
+      
+      let matchedIndex = -1;
+      if (skuKey && keyToIndex.has(skuKey)) {
+          matchedIndex = keyToIndex.get(skuKey);
+      } else if (barcodeKey && keyToIndex.has(barcodeKey)) {
+          matchedIndex = keyToIndex.get(barcodeKey);
       }
-    });
+
+      if (matchedIndex !== -1) {
+        const current = mergedProducts[matchedIndex];
+        current.sku = normalizedProduct.sku || current.sku;
+        current.barcode = normalizedProduct.barcode || current.barcode;
+        current.name = normalizedProduct.name || current.name;
+        current.division = normalizedProduct.division || current.division;
+        current.divisionName = normalizedProduct.divisionName || current.divisionName;
+        current.department = normalizedProduct.department || current.department;
+        current.departmentName = normalizedProduct.departmentName || current.departmentName;
+        if (skuKey) keyToIndex.set(skuKey, matchedIndex);
+        if (barcodeKey) keyToIndex.set(barcodeKey, matchedIndex);
+      } else {
+        const nextIndex = mergedProducts.length;
+        mergedProducts.push(normalizedProduct);
+        if (skuKey) keyToIndex.set(skuKey, nextIndex);
+        if (barcodeKey) keyToIndex.set(barcodeKey, nextIndex);
+      }
+    }
   });
 
   return { 
-    products: dedupeMasterProducts(collectedProducts),
+    products: mergedProducts, 
     info: detectedColumnsInfo 
   };
 }
@@ -724,6 +862,7 @@ export default function App() {
   const [masterSearchTerm, setMasterSearchTerm] = useState('');
   const [masterSearchInput, setMasterSearchInput] = useState('');
   const [masterPage, setMasterPage] = useState(1);
+  const [selectedMasterSkus, setSelectedMasterSkus] = useState(new Set());
   const ITEMS_PER_MASTER_PAGE = 100;
   const [isImportingMaster, setIsImportingMaster] = useState(false);
   const [isExportingMaster, setIsExportingMaster] = useState(false);
@@ -791,6 +930,8 @@ export default function App() {
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [isScannerStarting, setIsScannerStarting] = useState(false);
   const [scannerError, setScannerError] = useState('');
+  const [scanResult, setScanResult] = useState(null); // { barcode, sku, name, systemStock, division, department, found }
+  const [isTorchOn, setIsTorchOn] = useState(false);
   const [cameraPermissionState, setCameraPermissionState] = useState('unknown');
   const [toast, setToast] = useState(null);
   const [showManagePogModal, setShowManagePogModal] = useState(false);
@@ -830,13 +971,7 @@ export default function App() {
   const filteredMasterProducts = useMemo(() => {
     if (!masterSearchTerm) return masterProducts;
     const term = normaliseSearchText(masterSearchTerm);
-    return masterProducts.filter(p => 
-      normaliseSearchText(p.sku).includes(term) ||
-      normaliseSearchText(p.barcode).includes(term) ||
-      normaliseSearchText(p.name).includes(term) ||
-      normaliseSearchText(p.division || '').includes(term) ||
-      normaliseSearchText(p.department || '').includes(term)
-    );
+    return masterProducts.filter(p => p.searchLabel?.includes(term) || normaliseProductCode(p.sku).includes(term));
   }, [masterProducts, masterSearchTerm]);
 
   useEffect(() => {
@@ -943,8 +1078,20 @@ export default function App() {
   const canUseStockTools = Boolean(authUser && (isAdminAccount || authPermissions.stock !== false));
   const canManageAccounts = Boolean(authUser && (isAdminAccount || authPermissions.adminUsers === true));
 
-  // Translation helper
-  const t = (key) => translations[language]?.[key] ?? translations['vi']?.[key] ?? key;
+  const t = (key, ...args) => {
+    if (!key) return '';
+    const val = translations[language]?.[key] ?? translations['vi']?.[key] ?? translations['en']?.[key] ?? key;
+    if (typeof val === 'function') {
+      try {
+        const result = val(...args);
+        return result !== undefined ? result : key;
+      } catch (e) {
+        console.error(`Translation error for key "${key}":`, e);
+        return key;
+      }
+    }
+    return val !== undefined ? val : key;
+  };
   const manageAccountsLabel = language === 'en' ? 'Manage Accounts' : 'Quản lý tài khoản';
   const accountsTabLabel = language === 'en' ? 'Accounts' : 'Tài khoản';
   const createAccountLabel = language === 'en' ? 'Create account' : 'Tạo tài khoản';
@@ -1176,6 +1323,10 @@ export default function App() {
         sku: normalizedProduct.sku,
         barcode: normalizedProduct.barcode,
         productId: normalizedProduct.productId,
+        division: normalizedProduct.division,
+        divisionName: normalizedProduct.divisionName,
+        department: normalizedProduct.department,
+        departmentName: normalizedProduct.departmentName,
         stockStatus: 'unchecked',
       };
 
@@ -1199,6 +1350,10 @@ export default function App() {
           sku: normalizedProduct.sku,
           barcode: normalizedProduct.barcode,
           productId: normalizedProduct.productId,
+          division: normalizedProduct.division,
+          divisionName: normalizedProduct.divisionName,
+          department: normalizedProduct.department,
+          departmentName: normalizedProduct.departmentName,
           stockStatus: getStockMeta(product?.stockStatus).id,
         };
 
@@ -1250,16 +1405,87 @@ export default function App() {
   }, [aisleProducts, lossDraftItems, resolveProductName]);
 
   const filteredStockProducts = useMemo(() => {
-    const keyword = normaliseSearchText(checkStockSearchTerm);
-    if (!keyword) return allStockProducts;
-    
-    return allStockProducts.filter((product) => {
+    if (!checkStockSearchTerm || checkStockSearchTerm.trim() === '') {
+      return [];
+    }
+
+    const searchInput = String(checkStockSearchTerm);
+    const rawKeyword = normaliseProductCode(searchInput);
+    const keyword = normaliseSearchText(searchInput);
+
+    // 1. Try to find EXACT match by SKU or Barcode in Aisle first
+    const exactAisleMatches = allStockProducts.filter(p => 
+      normaliseProductCode(p.sku) === rawKeyword || 
+      normaliseProductCode(p.barcodeView) === rawKeyword ||
+      normaliseProductCode(p.productId) === rawKeyword
+    );
+
+    if (exactAisleMatches.length > 0) {
+      return exactAisleMatches.map(product => ({
+        ...product,
+        // Use normalized key for lookup
+        masterInfo: product.masterInfo || masterLookup.get(normaliseProductCode(product.sku)) || masterLookup.get(normaliseProductCode(product.barcodeView))
+      }));
+    }
+
+    // 2. Exact match in Master Data
+    const exactMasterMatches = masterProducts.filter(m => 
+       normaliseProductCode(m.sku) === rawKeyword || 
+       normaliseProductCode(m.barcode) === rawKeyword
+    );
+
+    if (exactMasterMatches.length > 0) {
+      return exactMasterMatches.map(m => ({
+          sku: m.sku, 
+          barcode: m.barcode, 
+          barcodeView: m.barcode,
+          name: m.name, 
+          displayName: m.name,
+          locId: 'Master',
+          lineKey: '-',
+          isFromMasterOnly: true,
+          masterInfo: m,
+          systemStock: 0,
+          actualStockFromLoss: '--',
+          stockStatus: 'unchecked'
+      }));
+    }
+
+    // 3. Fallback: Fuzzy search in Aisle
+    const fuzzyAisleMatches = allStockProducts.filter((product) => {
       const text = normaliseSearchText(
         `${product.sku} ${product.barcodeView} ${product.productId || ''} ${product.displayName || product.name || ''}`,
       );
       return text.includes(keyword);
     });
-  }, [allStockProducts, checkStockSearchTerm]);
+
+    if (fuzzyAisleMatches.length > 0) {
+      return fuzzyAisleMatches.map(product => ({
+        ...product,
+        masterInfo: product.masterInfo || masterLookup.get(product.sku) || masterLookup.get(product.barcodeView)
+      }));
+    }
+
+    // 4. Fallback: Fuzzy search in Master
+    const fuzzyMasterMatches = masterProducts.filter(m => 
+      normaliseSearchText(`${m.sku} ${m.barcode} ${m.name}`).includes(keyword)
+    ).slice(0, 1).map(m => ({ 
+      sku: m.sku, 
+      barcode: m.barcode, 
+      barcodeView: m.barcode,
+      name: m.name, 
+      displayName: m.name,
+      locId: 'Master',
+      lineKey: '-',
+      isFromMasterOnly: true,
+      masterInfo: m,
+      systemStock: 0,
+      actualStockFromLoss: '--',
+      stockStatus: 'unchecked'
+    }));
+
+    return fuzzyMasterMatches;
+  }, [allStockProducts, masterProducts, masterLookup, checkStockSearchTerm]);
 
   const filteredLossDraftItems = useMemo(() => {
     if (!lossSearchKeyword) {
@@ -1557,30 +1783,69 @@ export default function App() {
   }, [authToken]);
 
   useEffect(() => {
-    if ((!showMasterModal && !searchTerm && !lossSearchTerm && !checkStockSearchTerm) || hasLoadedMaster || isMasterLoading) {
-      return;
+    if (hasLoadedMaster || isMasterLoading) {
+       return;
     }
+    
+    // Only fetch if module is active, modal is open or searching
+    const needsMaster = activeModule === 'master' || showMasterModal || searchTerm || lossSearchTerm || checkStockSearchTerm;
+    if (!needsMaster) return;
 
     async function loadMasterData() {
       setIsMasterLoading(true);
+      
+      // 1. Try Loading from IndexedDB Cache first (Instant)
+      const cachedData = await idbGetMaster();
+      const cachedMeta = await idbGetMasterMeta();
+      
+      let hasLocal = false;
+      if (Array.isArray(cachedData) && cachedData.length > 0) {
+        setMasterProducts(cachedData);
+        setHasLoadedMaster(true);
+        setIsMasterLoading(false);
+        hasLocal = true;
+      }
+
       try {
         const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
-        const response = await fetchJsonWithTimeout('/api/master', { headers });
         
+        // 2. Check Version first
+        const infoRes = await fetchJsonWithTimeout('/api/master-info', { headers });
+        if (infoRes.ok) {
+          const info = await infoRes.json();
+          // If we have local cache and it matches server version, skip full download!
+          if (hasLocal && cachedMeta?.updatedAt === info.updatedAt) {
+            console.log('[Master] Cache is up to date:', info.updatedAt);
+            setIsMasterLoading(false);
+            return;
+          }
+        }
+
+        // 3. Needs Update or No Cache
+        const response = await fetchJsonWithTimeout('/api/master', { headers });
         if (!response.ok) throw new Error('Failed to load master data');
         
         const products = await response.json();
-        setMasterProducts(Array.isArray(products) ? dedupeMasterProducts(products) : []);
+        const data = Array.isArray(products) ? products : [];
+        
+        setMasterProducts(data);
         setHasLoadedMaster(true);
+        
+        // Save to cache with new timestamp
+        if (data.length > 0) {
+          idbSetMaster(data, { updatedAt: new Date().toISOString() });
+        }
       } catch (error) {
-        setToast(buildToast('error', 'Không tải được dữ liệu Master.'));
+        if (!hasLocal) {
+          setToast(buildToast('error', 'Không tải được dữ liệu Master.'));
+        }
       } finally {
         setIsMasterLoading(false);
       }
     }
 
     loadMasterData();
-  }, [showMasterModal, searchTerm, lossSearchTerm, checkStockSearchTerm, hasLoadedMaster, authToken]);
+  }, [activeModule, showMasterModal, searchTerm, lossSearchTerm, checkStockSearchTerm, hasLoadedMaster, isMasterLoading, authToken]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -2358,7 +2623,7 @@ export default function App() {
 
       scannerTimeoutRef.current = window.setTimeout(() => {
         scannerFrameRef.current = window.requestAnimationFrame(scanFrame);
-      }, 120);
+      }, 16); // Ultra-high sensitivity for native (scans almost every frame)
     };
 
     scannerFrameRef.current = window.requestAnimationFrame(scanFrame);
@@ -2366,23 +2631,62 @@ export default function App() {
   }
 
   async function startZxingBarcodeDetection(videoElement) {
-    const { BrowserMultiFormatReader } = await import('@zxing/browser');
-    const reader = new BrowserMultiFormatReader();
-    scannerReaderRef.current = reader;
-
-    const controls = await reader.decodeFromVideoElement(videoElement, (result) => {
-      const detectedCode = String(result?.getText?.() || result?.text || '').trim();
-
-      if (!detectedCode || detectedCode === lastScannedBarcodeRef.current) {
-        return;
+    try {
+      let ZXingLib;
+      try {
+        ZXingLib = await import('@zxing/library');
+      } catch (e) {
+        ZXingLib = await import('@zxing/browser');
       }
 
-      lastScannedBarcodeRef.current = detectedCode;
-      handleDetectedBarcode(detectedCode);
-    });
+      // BrowserBarcodeReader is often better for 1D barcodes (EAN/UPC)
+      const { BrowserBarcodeReader, BrowserMultiFormatReader } = await import('@zxing/browser');
+      const DecodeHintType = ZXingLib.DecodeHintType;
+      const BarcodeFormat = ZXingLib.BarcodeFormat;
 
-    scannerControlsRef.current = controls;
-    return true;
+      let reader;
+      if (DecodeHintType && BarcodeFormat) {
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.ITF,
+          BarcodeFormat.RSS_14
+        ]);
+        // Speed optimization: Disable TRY_HARDER for retail-ready performance.
+        // It consumes significant CPU and can slow down frame rates on mobile.
+        hints.set(DecodeHintType.TRY_HARDER, false);
+        hints.set(DecodeHintType.ASSUME_GS1, true);
+        
+        // Use Barcode-specific reader if available, otherwise MultiFormat
+        const ReaderClass = BrowserBarcodeReader || BrowserMultiFormatReader;
+        reader = new ReaderClass(hints);
+      } else {
+        const ReaderClass = BrowserBarcodeReader || BrowserMultiFormatReader;
+        reader = new ReaderClass();
+      }
+
+      scannerReaderRef.current = reader;
+
+      const controls = await reader.decodeFromVideoElement(videoElement, (result) => {
+        const detectedCode = String(result?.getText?.() || result?.text || '').trim();
+        if (!detectedCode || detectedCode === lastScannedBarcodeRef.current) {
+          return;
+        }
+        lastScannedBarcodeRef.current = detectedCode;
+        handleDetectedBarcode(detectedCode);
+      });
+
+      scannerControlsRef.current = controls;
+      return true;
+    } catch (error) {
+      console.error('ZXing Startup Error:', error);
+      throw error;
+    }
   }
 
   async function startBarcodeScannerSession() {
@@ -2397,15 +2701,17 @@ export default function App() {
       lastScannedBarcodeRef.current = '';
 
       if (!navigator?.mediaDevices?.getUserMedia) {
-        throw new Error('Trinh duyet nay khong ho tro camera barcode.');
+        throw new Error('Trình duyệt của bạn không hỗ trợ Camera.');
       }
 
+      // High-performance constraints for retail barcodes
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 640 }, // Lowering resolution slightly speeds up JS-based decoding significantly
+          height: { ideal: 480 },
+          frameRate: { ideal: 60 } // Requesting higher frame rate for smoother detection
         },
       });
 
@@ -2418,18 +2724,20 @@ export default function App() {
       await videoElement.play();
       setCameraPermissionState('granted');
 
-      let hasActiveDetector = false;
-
+      // Attempt Native Detector First (Ultra Fast)
+      let detectorActive = false;
       try {
-        hasActiveDetector = await startNativeBarcodeDetection(videoElement);
-      } catch {}
+        detectorActive = await startNativeBarcodeDetection(videoElement);
+      } catch (err) {
+        console.warn('Native detector failed:', err);
+      }
 
-      try {
-        await startZxingBarcodeDetection(videoElement);
-        hasActiveDetector = true;
-      } catch (error) {
-        if (!hasActiveDetector) {
-          throw error;
+      // Fallback to ZXing if native is not available or failed
+      if (!detectorActive) {
+        try {
+          await startZxingBarcodeDetection(videoElement);
+        } catch (zxError) {
+          throw new Error('Không thể khởi động bộ quét: ' + zxError.message);
         }
       }
 
@@ -2450,14 +2758,38 @@ export default function App() {
     stopBarcodeScannerSession();
     setShowBarcodeScanner(false);
     setIsScannerStarting(false);
+    setIsTorchOn(false);
     setScannerError('');
+    setScanResult(null);
     lastScannedBarcodeRef.current = '';
   }
 
-  function openBarcodeScanner() {
-    if (activeModule === 'stock' && !requireFeatureAccess(canUseStockTools, 'stock')) {
-      return;
+  async function toggleTorch() {
+    try {
+      const stream = scannerStreamRef.current;
+      if (!stream) return;
+      const track = stream.getVideoTracks()[0];
+      if (!track) return;
+
+      const capabilities = track.getCapabilities();
+      if (!capabilities.torch) {
+        setToast(buildToast('error', 'Camera nay khong ho tro den flash.'));
+        return;
+      }
+
+      const nextState = !isTorchOn;
+      await track.applyConstraints({
+        advanced: [{ torch: nextState }]
+      });
+      setIsTorchOn(nextState);
+    } catch (error) {
+       console.error('Torch error:', error);
     }
+  }
+
+  function openBarcodeScanner() {
+    // Mở khóa tính năng Camera cho Guest (Người dùng khách)
+    // Guest vẫn có quyền Scan Barcode để tra cứu tồn kho (Stock/POG). Chỉ chặn Scanner ở module Loss.
 
     if (activeModule === 'loss' && !requireFeatureAccess(canUseLossTools, 'loss')) {
       return;
@@ -2479,6 +2811,11 @@ export default function App() {
   }
 
   function addLossItemFromCode(rawCode, sourceLabel = 'scan') {
+    if (!rawCode) {
+      setToast(buildToast('error', t('errNeedInputBeforeScan')));
+      return false;
+    }
+    
     const barcodeInput = normaliseProductCode(rawCode);
 
     if (!barcodeInput) {
@@ -2487,85 +2824,156 @@ export default function App() {
     }
 
     setLossBarcodeInput(String(rawCode || '').trim());
-    setLossSearchTerm(String(rawCode || '').trim());
+    // Removed auto-set of lossSearchTerm to avoid hiding other items during scan session
 
-    const matched = productCodeLookup.get(barcodeInput);
+    try {
+      const matched = productCodeLookup.get(barcodeInput);
 
-    if (!matched) {
-      setToast(buildToast('error', t('errNotFoundProductCode', String(rawCode || '').trim())));
-      return false;
-    }
-
-    const nowIso = new Date().toISOString();
-
-    setLossDraftItems((current) => {
-      const currentIndex = current.findIndex((item) => {
-        return normaliseProductCode(item?.barcode || item?.productId || item?.sku) === barcodeInput;
-      });
-
-      if (currentIndex >= 0) {
-        return current.map((item, index) =>
-          index === currentIndex
-            ? {
-                ...item,
-                barcode: matched.barcode || matched.productId || matched.sku,
-                productId: matched.productId || matched.barcode || matched.sku,
-                sku: matched.sku || matched.barcode || matched.productId,
-                name: matched.name || item.name || '',
-                lineKey: matched.lineKey || item.lineKey,
-                locId: matched.locId || item.locId,
-                stockStatus: matched.stockStatus || item.stockStatus || 'unchecked',
-                lastScannedAt: nowIso,
-                lossQuantity: computeLossValue(item.systemStock, item.actualStock),
-              }
-            : item,
-        );
+      if (!matched) {
+        setToast(buildToast('error', t('errNotFoundProductCode', String(rawCode || '').trim())));
+        return false;
       }
 
-      return [
-        {
-          id: `loss-item-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-          barcode: matched.barcode || matched.productId || matched.sku,
-          productId: matched.productId || matched.barcode || matched.sku,
-          sku: matched.sku || matched.barcode || matched.productId,
-          name: matched.name || '',
-          lineKey: matched.lineKey,
-          locId: matched.locId,
-          systemStock: '',
-          actualStock: '',
-          lossQuantity: 0,
-          stockStatus: matched.stockStatus || 'unchecked',
-          scannedAt: nowIso,
-          lastScannedAt: nowIso,
-        },
-        ...current,
-      ];
-    });
+      const nowIso = new Date().toISOString();
 
-    setToast(
-      buildToast(
-        'success',
-        t('msgScanned', sourceLabel, matched.name || matched.sku || matched.barcode || 'sản phẩm'),
-      ),
-    );
+      setLossDraftItems((current) => {
+        const currentIndex = current.findIndex((item) => {
+          return normaliseProductCode(item?.barcode || item?.productId || item?.sku) === barcodeInput;
+        });
 
-    return true;
+        if (currentIndex >= 0) {
+          return current.map((item, index) =>
+            index === currentIndex
+              ? {
+                  ...item,
+                  barcode: matched.barcode || matched.productId || matched.sku || '',
+                  productId: matched.productId || matched.barcode || matched.sku || '',
+                  sku: matched.sku || matched.barcode || matched.productId || '',
+                  name: matched.name || item.name || '',
+                  lineKey: matched.lineKey || item.lineKey || '',
+                  locId: matched.locId || item.locId || '',
+                  stockStatus: matched.stockStatus || item.stockStatus || 'unchecked',
+                  division: matched.division || item.division || '',
+                  divisionName: matched.divisionName || item.divisionName || '',
+                  department: matched.department || item.department || '',
+                  departmentName: matched.departmentName || item.departmentName || '',
+                  lastScannedAt: nowIso,
+                  lossQuantity: computeLossValue(item.systemStock, item.actualStock),
+                }
+              : item,
+          );
+        }
+
+        return [
+          {
+            id: `loss-item-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            barcode: matched.barcode || matched.productId || matched.sku || '',
+            productId: matched.productId || matched.barcode || matched.sku || '',
+            sku: matched.sku || matched.barcode || matched.productId || '',
+            name: matched.name || '',
+            lineKey: matched.lineKey || '',
+            locId: matched.locId || '',
+            systemStock: '',
+            actualStock: '',
+            lossQuantity: 0,
+            stockStatus: matched.stockStatus || 'unchecked',
+            division: matched.division || '',
+            divisionName: matched.divisionName || '',
+            department: matched.department || '',
+            departmentName: matched.departmentName || '',
+            scannedAt: nowIso,
+            lastScannedAt: nowIso,
+          },
+          ...current,
+        ];
+      });
+
+      const displayName = matched.name || matched.sku || matched.barcode || 'sản phẩm';
+      setToast(
+        buildToast(
+          'success',
+          t('msgScanned', sourceLabel, displayName),
+        ),
+      );
+
+      return true;
+    } catch (error) {
+       console.error('Scan processing error:', error);
+       setToast(buildToast('error', 'Lỗi xử lý dữ liệu quét.'));
+       return false;
+    }
   }
 
   function handleDetectedBarcode(scannedCode) {
+    if (!scannedCode || scannedCode === 'undefined') {
+      console.warn('Scan result is invalid:', scannedCode);
+      return;
+    }
+
+    // Stop scanning loop FIRST to prevent repeated triggers, but keep modal open
+    if (scannerFrameRef.current) {
+      window.cancelAnimationFrame(scannerFrameRef.current);
+      scannerFrameRef.current = 0;
+    }
+    if (scannerTimeoutRef.current) {
+      window.clearTimeout(scannerTimeoutRef.current);
+      scannerTimeoutRef.current = 0;
+    }
+    scannerControlsRef.current?.stop?.();
+    scannerControlsRef.current = null;
+
     const didVibrate = triggerBarcodeScanFeedback();
+    if (!didVibrate) playScannerFeedbackTone();
 
-    if (!didVibrate) {
-      playScannerFeedbackTone();
-    }
-
-    if (activeModule === 'stock') {
-      setCheckStockSearchTerm(scannedCode);
-      setCheckStockBarcodeInput(scannedCode);
-    } else {
+    if (activeModule === 'loss') {
       addLossItemFromCode(scannedCode, 'quet');
+      closeBarcodeScanner();
+      return;
     }
-    closeBarcodeScanner();
+
+    // --- Stock / POG mode: look up in Master then display result INSIDE scanner modal ---
+    const rawCode = String(scannedCode).trim();
+    const normCode = rawCode.toLowerCase();
+
+    // Search masterLookup first (exact)
+    let master = masterLookup.get(rawCode) || masterLookup.get(normCode);
+
+    // Search masterProducts array if not found
+    if (!master) {
+      const found = masterProducts.find(m =>
+        String(m.sku).toLowerCase() === normCode ||
+        String(m.barcode).toLowerCase() === normCode
+      );
+      if (found) master = found;
+    }
+
+    // Also search allStockProducts for systemStock
+    const aisleMatch = allStockProducts.find(p =>
+      String(p.sku).toLowerCase() === normCode ||
+      String(p.barcodeView).toLowerCase() === normCode ||
+      String(p.barcode || '').toLowerCase() === normCode
+    );
+
+    const resultInfo = {
+      barcode: rawCode,
+      sku: master?.sku || aisleMatch?.sku || rawCode,
+      name: master?.name || aisleMatch?.displayName || aisleMatch?.name || '',
+      systemStock: aisleMatch?.systemStock ?? master?.systemStock ?? '--',
+      division: master?.division || aisleMatch?.division || '',
+      department: master?.department || aisleMatch?.department || '',
+      found: !!(master || aisleMatch),
+    };
+
+    setScanResult(resultInfo);
+
+    // Điền mã vào ô tìm kiếm của mô-đun hiện tại để khi đóng modal sẽ thấy kết quả ngay
+    if (activeModule === 'stock') {
+      setCheckStockSearchTerm(rawCode);
+      setCheckStockBarcodeInput(rawCode);
+    } else {
+      // Cho POG hoặc Master Data
+      setSearchTerm(rawCode);
+    }
   }
 
   function handleStockScanSubmit(event) {
@@ -2778,7 +3186,9 @@ export default function App() {
         'Số lượng thực tế': product?.actualStockFromLoss !== '--' ? product.actualStockFromLoss : 0,
         'Hệ thống': product?.systemStock ?? 0,
         'Line': product?.lineKey || '',
-        'Nhãn (Loc)': product?.locId || ''
+        'Nhãn (Loc)': product?.locId || '',
+        'Bộ phận': product?.divisionName || product?.division || '',
+        'Phòng ban': product?.departmentName || product?.department || ''
       };
     });
 
@@ -2880,14 +3290,19 @@ export default function App() {
             const updatedProducts = [...currentProducts];
             lineUpdateCount++;
 
+            // Optimization: Create a lookup map for existing products in this line
+            const productLookup = new Map();
+            updatedProducts.forEach((p, idx) => {
+              if (p.sku) productLookup.set(String(p.sku).trim(), idx);
+              if (p.barcode) productLookup.set(String(p.barcode).trim(), idx);
+              if (p.productId) productLookup.set(String(p.productId).trim(), idx);
+            });
+
             lineRows.forEach(row => {
               const skuVal = String(row[skuIdx] || '').trim();
+              if (!skuVal) return;
               
-              const matchedIndex = updatedProducts.findIndex(p => 
-                String(p.sku || '').trim() === skuVal || 
-                String(p.barcode || '').trim() === skuVal ||
-                String(p.productId || '').trim() === skuVal
-              );
+              const matchedIndex = productLookup.has(skuVal) ? productLookup.get(skuVal) : -1;
 
               const newProductData = {
                 locId: locIdx >= 0 ? (Number(row[locIdx]) || 1) : 1,
@@ -2907,12 +3322,14 @@ export default function App() {
                 };
               } else {
                 addedCount++;
-                updatedProducts.push({
+                const newIdx = updatedProducts.push({
                   ...newProductData,
                   barcode: skuVal,
                   productId: skuVal,
                   stockStatus: 'unchecked'
-                });
+                }) - 1;
+                // Update lookup map with new product
+                productLookup.set(skuVal, newIdx);
               }
             });
 
@@ -2951,8 +3368,9 @@ export default function App() {
       return;
     }
 
-    setToast(buildToast('success', 'Đang phân tích dữ liệu Master...'));
+    setToast(buildToast('success', 'Đang xóa dữ liệu cũ & chuẩn bị nhập Master mới...'));
     setIsImportingMaster(true);
+    setMasterProducts([]); // clear current UI state immediately
 
     try {
       const XLSX = await import('xlsx');
@@ -2970,7 +3388,7 @@ export default function App() {
         masterProducts: nextMaster,
       });
       
-      setToast(buildToast('success', `Cập nhật thành công ${nextMaster.length} sản phẩm. ${result.info || ''}`));
+      setToast(buildToast('success', `Đã xóa Master cũ & cập nhật hoàn toàn ${nextMaster.length} sản phẩm mới. ${result.info || ''}`));
       setIsImportingMaster(false);
       event.target.value = '';
     } catch (error) {
@@ -2978,6 +3396,46 @@ export default function App() {
       setToast(buildToast('error', 'Lỗi khi import: ' + (error.message || 'Không xác định')));
       setIsImportingMaster(false);
       event.target.value = '';
+    }
+  }
+
+  async function handleClearMasterData() {
+    if (!requireFeatureAccess(isAdminAccount, 'admin')) return;
+    
+    if (!window.confirm('Bạn có chắc chắn muốn XÓA TOÀN BỘ dữ liệu Master? Thao tác này không thể hoàn tác.')) {
+      return;
+    }
+    
+    setIsImportingMaster(true);
+    try {
+      await saveSharedState(aisleProducts, lossAudits, 'pog', {
+        masterProducts: [],
+      });
+      setMasterProducts([]);
+      setToast(buildToast('success', 'Đã xóa toàn bộ dữ liệu Master.'));
+    } catch (error) {
+      setToast(buildToast('error', error.message || 'Lỗi khi xóa dữ liệu.'));
+    } finally {
+      setIsImportingMaster(false);
+    }
+  }
+
+  async function handleDeleteMasterItem(sku) {
+    if (!requireFeatureAccess(canEditPog, 'pog')) return;
+
+    if (!window.confirm(`Xóa sản phẩm SKU ${sku}?`)) {
+      return;
+    }
+    
+    const nextMaster = masterProducts.filter(p => p.sku !== sku);
+    try {
+      await saveSharedState(aisleProducts, lossAudits, 'pog', {
+        masterProducts: nextMaster,
+      });
+      setMasterProducts(nextMaster);
+      setToast(buildToast('success', `Đã xóa sản phẩm ${sku}.`));
+    } catch (error) {
+      setToast(buildToast('error', error.message || 'Lỗi khi xóa sản phẩm.'));
     }
   }
 
@@ -2995,7 +3453,11 @@ export default function App() {
         SKU: p.sku,
         Barcode: p.barcode,
         'Product ID': p.productId || '',
-        'Tên sản phẩm': p.name
+        'Tên sản phẩm': p.name,
+        Division: p.division,
+        'Division Name': p.divisionName,
+        Department: p.department,
+        'Department Name': p.departmentName
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(data);
@@ -3200,18 +3662,43 @@ export default function App() {
                   <Target size={16} />
                   <span>{selectedShelf.name}</span>
                 </h2>
-                {isAdminAccount && (
-                  <button
-                    type="button"
-                    className="icon-button icon-button-ghost btn-xs"
-                    onClick={() => {
-                      setTempAisleName(selectedShelf.name);
-                      setIsRenamingAisle(true);
-                    }}
-                    title="Đổi tên line"
-                  >
-                    <Settings size={14} />
-                  </button>
+                {canEditPog ? (
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      type="button"
+                      className="icon-button icon-button-ghost btn-xs"
+                      onClick={() => {
+                        if (!isAdminAccount) {
+                          setToast(buildToast('error', 'Chỉ tài khoản Quản lý mới được đổi tên line.'));
+                          return;
+                        }
+                        setTempAisleName(selectedShelf.name);
+                        setIsRenamingAisle(true);
+                      }}
+                      title="Đổi tên line"
+                    >
+                      <Settings size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button icon-button-ghost btn-xs"
+                      style={{ color: '#ef4444' }}
+                      onClick={() => {
+                        if (!isAdminAccount) {
+                          setToast(buildToast('error', 'Chỉ tài khoản Quản lý mới được xóa dữ liệu line.'));
+                          return;
+                        }
+                        deletePogData(selectedId);
+                      }}
+                      title="Xóa toàn bộ dữ liệu Line này"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ marginLeft: '0.5rem', opacity: 0.5, fontSize: '0.8rem' }}>
+                    <ShieldCheck size={12} /> View Only
+                  </div>
                 )}
               </>
             )}
@@ -3239,7 +3726,7 @@ export default function App() {
           {isCompactView ? (
             <div className="mobile-selected-summary">
               <span className="mobile-selected-pill">
-                {t('productCount')(selectedCount)}
+                {t('productCount', selectedCount)}
               </span>
               <span className="mobile-selected-pill">
                 {selectedShelf.cat}
@@ -3265,7 +3752,7 @@ export default function App() {
               <div>
                 <strong>{t('stockTitle')}</strong>
                 <p>
-                  {t('stockUpdated')(selectedStockSummary.checked, selectedStockSummary.total)}
+                  {t('stockUpdated', selectedStockSummary.checked, selectedStockSummary.total)}
                 </p>
               </div>
               {savingStockKey ? <span className="stock-saving-chip">{t('savingStock')}</span> : null}
@@ -3399,147 +3886,138 @@ export default function App() {
   ) : null;
 
   const stockPanel = (
-    <section className="loss-layout">
-      <section className="loss-toolbar-card">
-        <div className="loss-toolbar-copy">
-          <p className="section-label">{t('stockTitle')}</p>
-          <h2>
-            <Database size={18} />
-            <span>{t('stockSubtitle')}</span>
-          </h2>
-          <p>{t('stockDescription')}</p>
-        </div>
-
-        <div className="summary-strip summary-strip-inline" aria-label="Tổng quan kiểm tồn">
-          {moduleSummaryItems.map((item) => (
-            <article
-              key={`stock-summary-${item.label}`}
-              className={`summary-card ${item.highlight ? 'summary-card-highlight' : ''}`}
-            >
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-            </article>
-          ))}
+    <section className="loss-layout stock-layout-modern">
+      <section className="stock-top-controls">
+        <div className="stock-hero-card">
+          <div className="stock-hero-content">
+            <div className="stock-hero-copy">
+              <p className="section-label">Inventory Check</p>
+              <h2>{t('stockTitle')}</h2>
+              <p>{t('stockScanHint')}</p>
+            </div>
+            <div className="stock-hero-actions">
+              <button
+                type="button"
+                className="action-pill-btn"
+                onClick={() => stockImportInputRef.current?.click()}
+              >
+                <FileUp size={16} />
+                <span>Nhập Excel</span>
+              </button>
+              <button
+                type="button"
+                className="action-pill-btn"
+                disabled={filteredStockProducts.length === 0}
+                onClick={exportStockExcel}
+              >
+                <Download size={16} />
+                <span>Xuất báo cáo</span>
+              </button>
+              <input
+                type="file"
+                ref={stockImportInputRef}
+                style={{ display: 'none' }}
+                accept=".xlsx, .xls, .csv"
+                onChange={handleStockImportExcel}
+              />
+            </div>
+          </div>
+          
+          <form className="stock-main-search" onSubmit={handleStockScanSubmit}>
+            <div className="stock-search-field">
+              <Search className="search-icon" size={20} />
+              <input
+                type="text"
+                value={checkStockBarcodeInput}
+                onChange={(event) => setCheckStockBarcodeInput(event.target.value)}
+                placeholder="Tìm sản phẩm / Quét Barcode..."
+                autoComplete="off"
+              />
+              <button type="button" className="barcode-trigger" onClick={openBarcodeScanner}>
+                <Camera size={20} />
+              </button>
+            </div>
+          </form>
         </div>
       </section>
 
-      <section className="loss-workspace-grid">
-        <article className="loss-card loss-entry-card" style={{ gridColumn: '1 / -1' }}>
-          <div className="loss-card-head">
-            <div>
-              <h3>
-                <Barcode size={18} />
-                <span>{t('stockScanTitle')}</span>
-              </h3>
-              <p>{t('stockScanHint')}</p>
+      <section className="stock-content-area">
+        {!checkStockSearchTerm ? (
+          <div className="stock-empty-welcome">
+            <div className="welcome-icon">
+              <PackageSearch size={48} strokeWidth={1.5} />
             </div>
+            <h3>Sẵn sàng kiểm tra kho</h3>
+            <p>Nhập mã SKU hoặc sử dụng máy quét để xem thông tin chi tiết sản phẩm.</p>
           </div>
-
-          <form className="loss-entry-form" onSubmit={handleStockScanSubmit}>
-            <label className="field">
-              <span>Barcode / SKU / Product ID</span>
-              <div className="loss-scan-row">
-                <input
-                  type="text"
-                  value={checkStockBarcodeInput}
-                  onChange={(event) => setCheckStockBarcodeInput(event.target.value)}
-                  placeholder="Nhập mã và nhấn Enter"
-                  autoComplete="off"
-                />
-                <button type="button" className="secondary-button loss-scan-button" onClick={openBarcodeScanner}>
-                  <Camera size={16} />
-                </button>
-                <button type="submit" className="primary-button">
-                  <Search size={16} />
-                  <span>Tìm</span>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  title="Nhập Excel Master"
-                  disabled={isImportingStockFile}
-                  onClick={() => stockImportInputRef.current?.click()}
-                >
-                  <FileUp size={16} />
-                  <span>Cập nhật File</span>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  title="Tải báo cáo"
-                  disabled={isExportingStockFile || filteredStockProducts.length === 0}
-                  onClick={exportStockExcel}
-                >
-                  <Download size={16} />
-                  <span>Xuất báo cáo</span>
-                </button>
-                <input
-                  type="file"
-                  ref={stockImportInputRef}
-                  style={{ display: 'none' }}
-                  accept=".xlsx, .xls, .csv"
-                  onChange={handleStockImportExcel}
-                />
-              </div>
-            </label>
-          </form>
-
-          {checkStockSearchTerm ? (
-             <div className="glass-panel" style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', borderRadius: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-               <span style={{ color: 'var(--accent-primary)' }}>{t('filteringBy')} <strong>{checkStockSearchTerm}</strong></span>
-               <button className="secondary-button" style={{minWidth: 'auto', padding: '0.4rem 0.8rem'}} onClick={() => { setCheckStockSearchTerm(''); setCheckStockBarcodeInput(''); }}>{t('btnClearFilter')}</button>
-             </div>
-          ) : null}
-          
-          <div className="loss-draft-list" style={{ marginTop: '2rem', display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))' }}>
+        ) : (
+          <div className="stock-results-grid">
             {filteredStockProducts.length > 0 ? (
               filteredStockProducts.map((product, idx) => {
+                const skuCode = normaliseProductCode(product.sku);
+                const bcViewCode = normaliseProductCode(product.barcodeView);
+                const bcCode = normaliseProductCode(product.barcode);
+                const masterInfo = product.masterInfo || (masterLookup.get(skuCode) || masterLookup.get(bcViewCode) || masterLookup.get(bcCode));
                 const stockMeta = getStockMeta(product.stockStatus);
-                const masterInfo = masterProducts.find(m => m.sku === product.sku || m.barcode === product.barcode || m.barcode === product.productId);
                 
                 return (
-                  <article key={`${product.locId}-${product.sku}-${idx}`} className="loss-item-row" style={{ padding: '1.2rem', gap: '1rem', flexDirection: 'column', alignItems: 'flex-start', border: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
-                      <div className="loss-item-main" style={{ flex: 1 }}>
-                        <h4 style={{ fontSize: '1.1rem', marginBottom: '0.4rem', color: '#1e293b' }}>
-                           <HighlightText text={resolveProductName(product) || 'Sản phẩm chưa có tên'} highlight={checkStockSearchTerm} />
-                        </h4>
-                        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
-                            Line {product.lineKey} | {product.locId}
-                          </span>
-                        <span style={{ fontSize: '0.85rem', color: '#64748b', background: '#f8fafc', padding: '0.2rem 0.5rem', borderRadius: '0.4rem' }}>
-                            SKU: {product.sku || '--'}
-                          </span>
+                  <article key={`${product.locId}-${product.sku}-${idx}`} className="stock-result-card">
+                    <div className="card-top-info">
+                      <div className="main-details">
+                        <div className="category-path">
+                          {masterInfo?.division || '-'} <span>/</span> {masterInfo?.department || '-'}
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
-                             <Tag size={12} />
-                             {masterInfo?.division || '-'} {masterInfo?.department ? `> ${masterInfo.department}` : ''}
-                           </div>
+                        <h3>
+                           <HighlightText text={resolveProductName(product) || 'Không có tên'} highlight={checkStockSearchTerm} />
+                        </h3>
+                        <div className="stock-id-row">
+                          <div className="id-item">
+                            <Hash size={12} />
+                            <span>SKU: {product.sku || '--'}</span>
+                          </div>
+                          <div className="id-item">
+                            <Barcode size={12} />
+                            <span>{product.barcodeView || product.barcode || '--'}</span>
+                          </div>
+                        </div>
                       </div>
-                      <span className={`stock-summary-pill stock-summary-pill-${stockMeta.tone}`} style={{ flexShrink: 0 }}>
-                        <CheckCircle2 size={12} style={{marginRight: '0.3rem'}} />
-                        <strong>{stockMeta.shortLabel}</strong>
-                      </span>
+                      
+                      {!product.isFromMasterOnly && (
+                        <div className={`status-badge status-${stockMeta.tone}`}>
+                          <CheckCircle2 size={12} />
+                          <span>{stockMeta.shortLabel}</span>
+                        </div>
+                      )}
                     </div>
 
-                    <div style={{ display: 'flex', width: '100%', gap: '1rem', alignItems: 'center', marginTop: '0.5rem', paddingTop: '0.8rem', borderTop: '1px solid #f8fafc' }}>
-                       <div style={{ flex: 1 }}>
-                         <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>Barcode: {product.barcodeView || '--'}</p>
-                       </div>
-                       
-                       <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <div className="loss-delta-pill" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}>
-                            <span>Máy</span>
-                            <strong>{product.systemStock ?? '--'}</strong>
+                    <div className="card-master-details stock-brief-details">
+                      <div className="master-grid">
+                        <div className="master-col">
+                          <label>Division</label>
+                          <p>{masterInfo?.division || '-'}</p>
+                        </div>
+                        <div className="master-col">
+                          <label>Department</label>
+                          <p>{masterInfo?.department || '-'}</p>
+                        </div>
+                         <div className="master-col">
+                          <label>Vị trí</label>
+                          <p>{product.lineKey} | {product.locId}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card-footer-metrics stock-prime-metrics">
+                       <div className="metrics-label">Tồn kho hiện tại</div>
+                       <div className="metrics-group">
+                          <div className="metric-item">
+                            <label>Hệ thống</label>
+                            <span className="val-system">{product.systemStock ?? '--'}</span>
                           </div>
-                          <div className="loss-delta-pill" style={{ 
-                            background: product.actualStockFromLoss > 0 ? 'rgba(16, 185, 129, 0.1)' : '#f1f5f9', 
-                            color: product.actualStockFromLoss > 0 ? '#059669' : '#94a3b8',
-                            border: product.actualStockFromLoss > 0 ? '1px solid rgba(16, 185, 129, 0.2)' : '1px solid #e2e8f0'
-                          }}>
-                            <span>Thực</span>
-                            <strong>{product.actualStockFromLoss}</strong>
+                          <div className="metric-divider"></div>
+                          <div className={`metric-item highlight-${product.actualStockFromLoss > 0 ? 'success' : 'neutral'}`}>
+                            <label>Thực tế</label>
+                            <span className="val-actual">{product.actualStockFromLoss ?? 0}</span>
                           </div>
                        </div>
                     </div>
@@ -3547,16 +4025,18 @@ export default function App() {
                 );
               })
             ) : (
-              <div className="empty-state loss-empty-state" style={{ gridColumn: '1 / -1' }}>
-                <PackageSearch size={34} strokeWidth={1.4} />
-                <p>{t('noProductFound')}</p>
+              <div className="stock-no-results">
+                <SearchX size={42} strokeWidth={1.5} />
+                <h4>Không tìm thấy kết quả</h4>
+                <p>Thử tìm kiếm theo SKU hoặc Barcode khác.</p>
               </div>
             )}
           </div>
-        </article>
+        )}
       </section>
     </section>
   );
+
 
   const lossPanel = (
     <section className="loss-layout">
@@ -3679,6 +4159,11 @@ export default function App() {
                       <p>
                         Barcode: {item.barcode || '--'} | Product ID: {item.productId || '--'}
                       </p>
+                      {(item.division || item.department) && (
+                        <p style={{ marginTop: '0.1rem', color: 'var(--accent-primary)', fontSize: '0.62rem', fontWeight: 800 }}>
+                          {[item.divisionName || item.division, item.departmentName || item.department].filter(Boolean).join(' » ')}
+                        </p>
+                      )}
                     </div>
 
                     <div className="loss-item-controls">
@@ -3762,7 +4247,7 @@ export default function App() {
                         {createdLabel} | {audit.createdByName || t('unknownCreator')}
                       </p>
                       <p>
-                        {t('totalItems')(audit.itemCount || (audit.items || []).length)} | {t('totalLossVal')(audit.totalLossQuantity || audit.totalQuantity || 0)}
+                        {t('totalItems', audit.itemCount || (audit.items || []).length)} | {t('totalLossVal', audit.totalLossQuantity || audit.totalQuantity || 0)}
                       </p>
                     </div>
 
@@ -3915,44 +4400,55 @@ export default function App() {
                 <PackageSearch size={18} />
               </div>
               <div className="brand-text">
-                <p className="brand-title">Picker Assistant</p>
-                <p className="brand-subtitle">{topbarModuleLabel}</p>
+                <p className="brand-title">{isCompactView ? 'Picker' : 'Picker Assistant'}</p>
+                {!isCompactView && <p className="brand-subtitle">{topbarModuleLabel}</p>}
               </div>
             </div>
           )}
 
-          <div className="topbar-divider" />
+          {!isCompactView && <div className="topbar-divider" />}
 
-          {/* Module Switcher */}
-          <div className="topbar-module-switch" role="tablist" aria-label="Chọn module">
-            <button
-              type="button"
-              className={activeModule === 'pog' ? 'is-active' : ''}
-              onClick={() => setActiveModule('pog')}
-              title="Planogram (POG)"
-            >
-              <LayoutGrid size={18} />
-              <span>POG</span>
-            </button>
-            <button
-              type="button"
-              className={activeModule === 'loss' ? 'is-active' : ''}
-              onClick={() => setActiveModule('loss')}
-              title={t('moduleLoss')}
-            >
-              <ClipboardList size={18} />
-              <span>{t('moduleLoss')}</span>
-            </button>
-            <button
-              type="button"
-              className={activeModule === 'stock' ? 'is-active' : ''}
-              onClick={() => setActiveModule('stock')}
-              title={t('moduleStock')}
-            >
-              <CheckCircle2 size={18} />
-              <span>{t('moduleStock')}</span>
-            </button>
-          </div>
+          {/* Module Switcher - Hide on mobile, moved to bottom nav */}
+          {!isCompactView && (
+            <div className="topbar-module-switch" role="tablist" aria-label="Chọn module">
+              <button
+                type="button"
+                className={activeModule === 'pog' ? 'is-active' : ''}
+                onClick={() => setActiveModule('pog')}
+                title="Planogram (POG)"
+              >
+                <LayoutGrid size={18} />
+                <span>POG</span>
+              </button>
+              <button
+                type="button"
+                className={activeModule === 'loss' ? 'is-active' : ''}
+                onClick={() => setActiveModule('loss')}
+                title={t('moduleLoss')}
+              >
+                <ClipboardList size={18} />
+                <span>{t('moduleLoss')}</span>
+              </button>
+              <button
+                type="button"
+                className={activeModule === 'stock' ? 'is-active' : ''}
+                onClick={() => setActiveModule('stock')}
+                title={t('moduleStock')}
+              >
+                <CheckCircle2 size={18} />
+                <span>{t('moduleStock')}</span>
+              </button>
+              <button
+                type="button"
+                className={activeModule === 'master' ? 'is-active' : ''}
+                onClick={() => setActiveModule('master')}
+                title="Master Data"
+              >
+                <Database size={18} />
+                <span>Master</span>
+              </button>
+            </div>
+          )}
 
           {/* Searchbox */}
           <label className={`searchbox ${mobileSearchOpen ? 'is-mobile-open' : ''}`}>
@@ -3977,53 +4473,17 @@ export default function App() {
 
           {/* Quick Actions */}
           <div className="topbar-quick-actions">
-            {activeModule === 'pog' ? (
-              <>
-                <button
-                  type="button"
-                  className="secondary-button with-primary-importance topbar-manage-btn"
-                  onClick={() => setShowManagePogModal(true)}
-                  title={t('btnManagePog')}
-                >
-                  <Database size={14} />
-                  <span>{t('btnManagePog')}</span>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => {
-                    console.log('Opening Master Modal (POG branch)');
-                    setShowMasterModal(true);
-                  }}
-                  title={t('btnManageMaster')}
-                >
-                  <TableProperties size={14} />
-                  <span>{t('btnManageMaster')}</span>
-                </button>
-                <button
-                  type="button"
-                  className="primary-button with-primary-importance"
-                  disabled={!canEditPog}
-                  onClick={openSyncModal}
-                  title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
-                >
-                  <Sparkles size={14} />
-                  <span>{t('btnUpdatePog')}</span>
-                </button>
-              </>
-            ) : (
-                <button
-                  type="button"
-                  className="secondary-button topbar-global-master-btn"
-                  onClick={() => {
-                    console.log('Opening Master Modal (Global branch)');
-                    setShowMasterModal(true);
-                  }}
-                  title={t('btnManageMaster')}
-                >
-                  <TableProperties size={14} />
-                  <span>{t('btnManageMaster')}</span>
-                </button>
+            {activeModule === 'pog' && (
+              <button
+                type="button"
+                className="primary-button with-primary-importance"
+                disabled={!canEditPog}
+                onClick={openSyncModal}
+                title={isReadOnly ? t('btnLogin') + ' để cập nhật POG' : t('btnUpdatePog')}
+              >
+                <Sparkles size={14} />
+                <span className="hide-mobile">{t('btnUpdatePog')}</span>
+              </button>
             )}
 
             {isReadOnly ? (
@@ -4034,31 +4494,31 @@ export default function App() {
                 title={t('btnLogin')}
               >
                 <LogIn size={14} />
-                <span>{t('btnLogin')}</span>
+                <span className="hide-mobile">{t('btnLogin')}</span>
               </button>
             ) : (
-              <>
-                {authUser ? (
-                  <div className="topbar-user-chip">
+              <div className="topbar-auth-group">
+                {authUser && (
+                  <div className="topbar-user-chip hide-mobile">
                     <UserRound size={14} />
                     <span>{authUser.username || authUser.name || 'User'}</span>
                   </div>
-                ) : null}
+                )}
                 <button
                   type="button"
-                  className="secondary-button topbar-auth-btn"
+                  className="secondary-button topbar-auth-btn btn-danger-mobile hide-mobile"
                   onClick={handleLogout}
                   title={t('btnLogout')}
                 >
                   <LogOut size={14} />
-                  <span>{t('btnLogout')}</span>
+                  <span className="hide-mobile">{t('btnLogout')}</span>
                 </button>
-              </>
+              </div>
             )}
 
             <button
               type="button"
-              className="topbar-icon-btn with-label"
+              className="topbar-icon-btn with-label hide-mobile"
               onClick={() => setIsDarkMode((prev) => !prev)}
               title={isDarkMode ? t('themeLight') : t('themeDark')}
             >
@@ -4068,7 +4528,7 @@ export default function App() {
 
             <button
               type="button"
-              className="topbar-icon-btn with-label"
+              className="topbar-icon-btn with-label hide-mobile"
               onClick={() => setLanguage((l) => l === 'vi' ? 'en' : 'vi')}
               title="Switch language"
             >
@@ -4098,102 +4558,49 @@ export default function App() {
         </div>
       </header>
 
-      <section className="summary-strip" aria-label="Tổng quan vận hành">
-        {moduleSummaryItems.map((item) => (
-          <article
-            key={`top-summary-${item.label}`}
-            className={`summary-card ${item.highlight ? 'summary-card-highlight' : ''}`}
-          >
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-          </article>
-        ))}
-      </section>
+
+      {!isCompactView && (
+        <section className="summary-strip" aria-label="Tổng quan vận hành">
+          {moduleSummaryItems.map((item) => (
+            <article
+              key={`top-summary-${item.label}`}
+              className={`summary-card ${item.highlight ? 'summary-card-highlight' : ''}`}
+            >
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </article>
+          ))}
+        </section>
+      )}
 
       {activeModule === 'pog' ? (
-        <>
-      <main className={workspaceClassName} style={workspaceStyle}>
-        {isCompactView ? (
-          <>
-            {drawerPanel}
-            {mapPanel}
-          </>
-        ) : (
-          canResizeDesktopLayout ? (
+        <main className={workspaceClassName} style={workspaceStyle}>
+          {isCompactView ? (
             <>
-              {mapPanel}
-              <div
-                className="workspace-divider"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label="Resize POG panel"
-                onPointerDown={handleDesktopResizeStart}
-              />
               {drawerPanel}
+              {mapPanel}
             </>
           ) : (
-            <>
-              {mapPanel}
-              {drawerPanel}
-            </>
-          )
-        )}
-      </main>
-
-      {isCompactView ? (
-        <section className="mobile-action-dock" aria-label="Tác vụ nhanh">
-          <button
-            type="button"
-            className="mobile-action-button mobile-action-secondary"
-            onClick={() => setShowManagePogModal(true)}
-            title="Dữ liệu POG"
-          >
-            <div className="icon-box">
-              <Database size={18} />
-            </div>
-            <span>Dữ liệu POG</span>
-          </button>
-          
-          <button
-            type="button"
-            className="mobile-action-button mobile-action-primary"
-            onClick={openSyncModal}
-            title={isReadOnly ? 'Đăng nhập để cập nhật POG' : 'Cập nhật POG'}
-          >
-            <div className="icon-box">
-              <Sparkles size={18} />
-            </div>
-            <span>Cập nhật POG</span>
-          </button>
-
-          {isReadOnly ? (
-            <button
-              type="button"
-              className="mobile-action-button mobile-action-secondary"
-              onClick={() => setShowLoginModal(true)}
-              title="Đăng nhập để chỉnh sửa"
-            >
-              <div className="icon-box">
-                <LogIn size={18} />
-              </div>
-              <span>Đăng nhập</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="mobile-action-button mobile-action-secondary"
-              onClick={handleLogout}
-              title="Đăng xuất"
-            >
-              <div className="icon-box">
-                <LogOut size={18} />
-              </div>
-              <span>Đăng xuất</span>
-            </button>
+            canResizeDesktopLayout ? (
+              <>
+                {mapPanel}
+                <div
+                  className="workspace-divider"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize POG panel"
+                  onPointerDown={handleDesktopResizeStart}
+                />
+                {drawerPanel}
+              </>
+            ) : (
+              <>
+                {mapPanel}
+                {drawerPanel}
+              </>
+            )
           )}
-        </section>
-      ) : null}
-        </>
+        </main>
       ) : activeModule === 'loss' ? (
         <main className="workspace workspace-loss">
           {lossPanel}
@@ -4201,6 +4608,158 @@ export default function App() {
       ) : activeModule === 'stock' ? (
         <main className="workspace workspace-stock">
           {stockPanel}
+        </main>
+      ) : activeModule === 'master' ? (
+        <main className="workspace workspace-master" style={{ padding: '0', background: '#f8fafc', height: '100%', overflow: 'hidden' }}>
+          <div className="master-standalone-panel" style={{ 
+            height: '100%', 
+            display: 'flex', 
+            flexDirection: 'column',
+            background: 'var(--bg-surface)',
+            color: 'var(--text-main)'
+          }}>
+            <header className="panel-header" style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-bright)', margin: 0 }}>Master Database</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Quản lý dữ liệu gốc toàn hệ thống</p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.6rem' }}>
+                <button
+                  className="action-pill-btn"
+                  style={{ background: 'var(--accent-primary)', color: 'white', border: 'none' }}
+                  onClick={() => masterImportRef.current?.click()}
+                >
+                  <FileUp size={16} />
+                  <span>Nhập Excel</span>
+                </button>
+                <button className="action-pill-btn" onClick={exportMasterExcel}>
+                  <Download size={16} />
+                  <span>Xuất Excel</span>
+                </button>
+                {canEditPog && (
+                  <button 
+                    className="action-pill-btn btn-danger-link" 
+                    disabled={masterProducts.length === 0}
+                    onClick={() => {
+                        if (!window.confirm('CẢNH BÁO: Xóa toàn bộ dữ liệu Master? Thao tác này không thể hoàn tác.')) return;
+                        handleClearMasterData();
+                    }}
+                  >
+                    <Trash2 size={16} />
+                    <span>Xóa Database</span>
+                  </button>
+                )}
+              </div>
+            </header>
+
+            <div className="panel-subhead" style={{ padding: '0.75rem 1.5rem', background: 'var(--bg-app)', borderBottom: '1px solid var(--border-subtle)' }}>
+               <div className="stock-search-field" style={{ maxWidth: '600px', boxShadow: 'none', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+                  <Search className="search-icon" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Tìm theo SKU, Barcode, Tên, Bộ phận..."
+                    value={masterSearchInput}
+                    onChange={e => {
+                        setMasterSearchInput(e.target.value);
+                        setMasterPage(1);
+                    }}
+                  />
+               </div>
+            </div>
+
+            <div className="panel-content" style={{ flex: 1, overflow: 'auto' }}>
+                <table className="master-grid-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-app)' }}>
+                    <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700 }}>
+                      <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-subtle)' }}>SKU</th>
+                      <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-subtle)' }}>Tên sản phẩm</th>
+                      <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-subtle)' }}>Barcode</th>
+                      <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-subtle)' }}>Division</th>
+                      <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-subtle)' }}>Department</th>
+                      {isAdminAccount && <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-subtle)', textAlign: 'right' }}>Thao tác</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {isMasterLoading ? (
+                      [...Array(6)].map((_, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #f8fafc' }}>
+                          <td style={{ padding: '1rem' }}><div className="skeleton" style={{ width: '80px', height: '1.2rem', background: 'var(--border-subtle)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div></td>
+                          <td style={{ padding: '1rem' }}><div className="skeleton" style={{ width: '200px', height: '1.2rem', background: 'var(--border-subtle)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div></td>
+                          <td style={{ padding: '1rem' }}><div className="skeleton" style={{ width: '120px', height: '1.2rem', background: 'var(--border-subtle)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div></td>
+                          <td style={{ padding: '1rem' }}><div className="skeleton" style={{ width: '60px', height: '1.2rem', background: 'var(--border-subtle)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div></td>
+                          <td style={{ padding: '1rem' }}><div className="skeleton" style={{ width: '100px', height: '1.2rem', background: 'var(--border-subtle)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div></td>
+                          {isAdminAccount && <td></td>}
+                        </tr>
+                      ))
+                    ) : (
+                      filteredMasterProducts.slice((masterPage - 1) * ITEMS_PER_MASTER_PAGE, masterPage * ITEMS_PER_MASTER_PAGE).map(p => (
+                        <tr key={p.sku} className="master-row-hover" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-bright)' }}>
+                             {p.sku}
+                          </td>
+                          <td style={{ padding: '1rem', fontSize: '0.9rem', color: 'var(--text-main)', fontWeight: 500 }}>
+                             {p.name}
+                          </td>
+                          <td style={{ padding: '1rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                             {p.barcode || '--'}
+                          </td>
+                          <td style={{ padding: '1rem' }}>
+                             <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-primary)', background: 'var(--accent-highlight)', padding: '0.2rem 0.5rem', borderRadius: '0.3rem', display: 'inline-block' }}>{p.division}</div>
+                             <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{p.divisionName}</div>
+                          </td>
+                          <td style={{ padding: '1rem' }}>
+                             <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-bright)' }}>{p.department}</div>
+                             <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{p.departmentName}</div>
+                          </td>
+                          {isAdminAccount && (
+                            <td style={{ padding: '1rem', textAlign: 'right' }}>
+                              <button 
+                                className="icon-button" 
+                                style={{ color: '#ef4444' }}
+                                onClick={() => handleDeleteMasterItem(p.sku)}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+                {filteredMasterProducts.length === 0 && (
+                   <div style={{ padding: '6rem 2rem', textAlign: 'center' }}>
+                      <PackageSearch size={48} style={{ color: '#cbd5e1', marginBottom: '1rem' }} />
+                      <p style={{ color: '#94a3b8' }}>Không tìm thấy dữ liệu Master phù hợp</p>
+                   </div>
+                )}
+            </div>
+
+            <footer className="panel-pagination" style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-app)' }}>
+               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                 Tổng: <strong>{filteredMasterProducts.length}</strong> sản phẩm
+               </div>
+               <div style={{ display: 'flex', gap: '0.5rem' }}>
+                 <button 
+                   className="action-pill-btn" 
+                   disabled={masterPage === 1}
+                   onClick={() => setMasterPage(p => p - 1)}
+                   style={{ fontSize: '0.75rem', padding: '0.4rem 0.75rem' }}
+                 >
+                   Trước
+                 </button>
+                 <span style={{ fontSize: '0.85rem', fontWeight: 600, padding: '0 0.5rem' }}>{masterPage}</span>
+                 <button 
+                   className="action-pill-btn"
+                   disabled={masterPage * ITEMS_PER_MASTER_PAGE >= filteredMasterProducts.length}
+                   onClick={() => setMasterPage(p => p + 1)}
+                   style={{ fontSize: '0.75rem', padding: '0.4rem 0.75rem' }}
+                 >
+                   Sau
+                 </button>
+               </div>
+            </footer>
+          </div>
         </main>
       ) : null}
 
@@ -4288,41 +4847,125 @@ export default function App() {
                 <span>{t('scannerTitle')}</span>
               </div>
 
-              <button type="button" className="icon-button icon-button-light" onClick={closeBarcodeScanner}>
-                <X size={22} />
-              </button>
+              <div style={{ display: 'flex', gap: '0.8rem' }}>
+                <button 
+                  type="button" 
+                  className={`icon-button ${isTorchOn ? 'is-active' : ''}`} 
+                  onClick={toggleTorch}
+                  style={{ color: isTorchOn ? 'var(--accent-primary)' : 'inherit', background: isTorchOn ? 'var(--accent-highlight)' : 'transparent' }}
+                  title="Bat/Tat den flash"
+                >
+                  <Sun size={22} fill={isTorchOn ? "currentColor" : "none"} />
+                </button>
+                <button type="button" className="icon-button icon-button-light" onClick={closeBarcodeScanner}>
+                  <X size={22} />
+                </button>
+              </div>
             </header>
 
             <div className="modal-body scanner-modal-body">
-              <div className="scanner-stage">
-                <video ref={scannerVideoRef} className="scanner-video" muted playsInline autoPlay />
-                <div className="scanner-frame" aria-hidden="true" />
-              </div>
-
-              <div className="scanner-copy">
-                <strong>{t('scannerHint')}</strong>
-                <p>{t('scannerDescription')}</p>
-              </div>
-
-              {isScannerStarting ? (
-                <div className="shared-loading scanner-loading">
-                  <span className="shared-loading-dot"></span>
-                  <p>{t('scannerStarting')}</p>
+              <div className="scanner-render-area" style={{ display: scanResult ? 'none' : 'block' }}>
+                <div className="scanner-stage">
+                  <video ref={scannerVideoRef} className="scanner-video" muted playsInline autoPlay />
+                  <div className="scanner-frame" aria-hidden="true" />
                 </div>
-              ) : null}
 
-              {scannerError ? (
-                <div className="scanner-error">
-                  <AlertTriangle size={16} />
-                  <span>{scannerError}</span>
+                <div className="scanner-copy">
+                  <strong>{t('scannerHint')}</strong>
+                  <p>{t('scannerDescription')}</p>
                 </div>
-              ) : null}
 
-              <div className="scanner-actions">
-                <button type="button" className="secondary-button" onClick={closeBarcodeScanner}>
-                  {t('btnClose')}
-                </button>
+                {isScannerStarting ? (
+                  <div className="shared-loading scanner-loading">
+                    <span className="shared-loading-dot"></span>
+                    <p>{t('scannerStarting')}</p>
+                  </div>
+                ) : null}
+
+                {scannerError ? (
+                  <div className="scanner-error">
+                    <AlertTriangle size={16} />
+                    <span>{scannerError}</span>
+                  </div>
+                ) : null}
+
+                <div className="scanner-actions">
+                  <button type="button" className="secondary-button" onClick={closeBarcodeScanner}>
+                    {t('btnClose')}
+                  </button>
+                </div>
               </div>
+
+              {scanResult && (
+                <div className="scan-result-card">
+                  <div className={`scan-result-status ${scanResult.found ? 'found' : 'not-found'}`}>
+                    {scanResult.found ? (
+                      <><CheckCircle2 size={20} /><span>Tìm thấy sản phẩm</span></>
+                    ) : (
+                      <><AlertTriangle size={20} /><span>Không tìm thấy sản phẩm</span></>
+                    )}
+                  </div>
+
+                  <div className="scan-result-barcode">
+                    <Barcode size={14} />
+                    <span>{scanResult.barcode}</span>
+                  </div>
+
+                  {scanResult.found ? (
+                    <table className="scan-result-table">
+                      <tbody>
+                        <tr>
+                          <th>SKU</th>
+                          <td>{scanResult.sku || '--'}</td>
+                        </tr>
+                        <tr>
+                          <th>Tên sản phẩm</th>
+                          <td>{scanResult.name || '--'}</td>
+                        </tr>
+                        <tr>
+                          <th>Tồn kho (HT)</th>
+                          <td className={`stock-val ${Number(scanResult.systemStock) > 0 ? 'in-stock' : ''}`}>
+                            {scanResult.systemStock}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th>Division</th>
+                          <td>{scanResult.division || '--'}</td>
+                        </tr>
+                        <tr>
+                          <th>Department</th>
+                          <td>{scanResult.department || '--'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="scan-result-hint">
+                      Mã <strong>{scanResult.barcode}</strong> chưa có trong Master Data. Hãy kiểm tra lại hoặc nhập Master Data trước.
+                    </p>
+                  )}
+
+                  <div className="scan-result-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => {
+                        setScanResult(null);
+                        lastScannedBarcodeRef.current = '';
+                        startBarcodeScannerSession().catch(err => setScannerError(err.message));
+                      }}
+                    >
+                      <Camera size={16} /> Quét tiếp
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => { setScanResult(null); closeBarcodeScanner(); }}
+                    >
+                      <CheckCircle2 size={16} /> Xong
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -4336,9 +4979,35 @@ export default function App() {
                 <Database size={24} />
                 <span>{t('managePogTitle')}</span>
               </div>
-              <button type="button" className="icon-button icon-button-light" onClick={() => setShowManagePogModal(false)}>
-                <X size={24} />
-              </button>
+              <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+                {canEditPog && Object.values(aisleProducts).some(items => items && items.length > 0) && (
+                  <button 
+                    type="button" 
+                    className="secondary-button" 
+                    onClick={async () => {
+                      if (!isAdminAccount) {
+                        setToast(buildToast('error', 'Chỉ tài khoản Quản lý mới có quyền xóa tất cả POG.'));
+                        return;
+                      }
+                      if (!window.confirm('Bạn có chắc chắn muốn XÓA TOÀN BỘ dữ liệu POG của TẤT CẢ các line?')) return;
+                      try {
+                        await saveSharedState({}, lossAudits, 'pog');
+                        setAisleProducts({});
+                        setToast(buildToast('success', 'Đã xóa toàn bộ dữ liệu POG.'));
+                      } catch (error) {
+                        setToast(buildToast('error', 'Lỗi khi xóa: ' + error.message));
+                      }
+                    }}
+                    style={{ color: '#dc2626', borderColor: '#fee2e2', background: '#fef2f2', fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                  >
+                    <Trash2 size={14} />
+                    Xóa tất cả POG
+                  </button>
+                )}
+                <button type="button" className="icon-button icon-button-light" onClick={() => setShowManagePogModal(false)}>
+                  <X size={24} />
+                </button>
+              </div>
             </header>
 
             <div className="modal-body">
@@ -4422,7 +5091,7 @@ export default function App() {
                             className={targetSide === side ? 'is-active' : ''}
                             onClick={() => setTargetSide(side)}
                           >
-                            {t('aiSideLabel')(side)}
+                            {t('aiSideLabel', side)}
                           </button>
                         ))}
                       </div>
@@ -4432,7 +5101,7 @@ export default function App() {
                   <label className="upload-zone">
                     <input type="file" accept="application/pdf" onChange={handleFileChange} />
                     <FileUp size={56} />
-                    <strong>{t('aiUploadPrimary')(uploadFile?.name)}</strong>
+                    <strong>{t('aiUploadPrimary', uploadFile?.name)}</strong>
                     <span>{t('aiUploadSecondary')}</span>
                   </label>
 
@@ -4482,7 +5151,7 @@ export default function App() {
                     <div>
                       <strong>{t('aiSuccess')}</strong>
                       <p>
-                        {t('aiFoundItems')(extractedData.length)}
+                        {t('aiFoundItems', extractedData.length)}
                         {extractedVisual?.src ? ` ${t('aiGeneratedLine')}` : '.'}
                       </p>
                     </div>
@@ -4499,7 +5168,7 @@ export default function App() {
                     <div className="extract-column">
                       <div className="extract-column-head">
                         <strong>{t('aiExtractedList')}</strong>
-                        <span>{t('totalItems')(extractedData.length)}</span>
+                        <span>{t('totalItems', extractedData.length)}</span>
                       </div>
 
                       <div className="extract-list">
@@ -4998,256 +5667,6 @@ export default function App() {
         </div>
       ) : null}
 
-      {showMasterModal ? (
-        <div className="modal-overlay" style={{ zIndex: 10000, background: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(8px)' }}>
-          <div className="modal-content emerald-theme" style={{ 
-            maxWidth: '1200px', 
-            width: '95%', 
-            maxHeight: '90vh', 
-            display: 'flex', 
-            flexDirection: 'column',
-            padding: 0,
-            overflow: 'hidden',
-            borderRadius: '1.2rem',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-            background: 'rgba(255, 255, 255, 0.95)'
-          }}>
-            <header className="modal-header" style={{ 
-                background: 'linear-gradient(135deg, var(--accent-primary) 0%, #059669 100%)', 
-                color: 'white', 
-                padding: '1.5rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-            }}>
-              <div>
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{t('masterTitle') || 'Quản lý Master Database'}</h2>
-                <p style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '0.2rem' }}>{t('masterSubtitle') || 'Source of Truth cho toàn bộ sản phẩm'}</p>
-              </div>
-              <button 
-                type="button" 
-                className="icon-button" 
-                onClick={() => setShowMasterModal(false)}
-                style={{ color: 'white', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', padding: '0.4rem' }}
-              >
-                <X size={20} />
-              </button>
-            </header>
-            
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem', padding: '1.5rem', overflow: 'hidden' }}>
-              <div className="master-toolbar" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-                <div className="search-box" style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
-                  <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-                  <input 
-                    type="text" 
-                    placeholder="Tìm kiếm theo SKU, Barcode, Tên, Ngành hàng..." 
-                    className="master-search-input"
-                    value={masterSearchInput}
-                    onChange={e => {
-                      setMasterSearchInput(e.target.value);
-                      setMasterPage(1);
-                    }}
-                    style={{ 
-                        width: '100%',
-                        padding: '0.75rem 1rem 0.75rem 2.8rem', 
-                        borderRadius: '0.8rem', 
-                        border: '1px solid #e2e8f0', 
-                        background: '#f8fafc', 
-                        fontSize: '0.95rem',
-                        transition: 'all 0.2s',
-                        outline: 'none'
-                    }}
-                  />
-                  {masterSearchInput && (
-                    <button 
-                      type="button"
-                      className="icon-button"
-                      onClick={() => {
-                          setMasterSearchInput('');
-                          setMasterSearchTerm('');
-                          setMasterPage(1);
-                      }}
-                      style={{ position: 'absolute', right: '0.8rem', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#94a3b8' }}
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.8rem' }}>
-                    <button
-                      className="primary-button"
-                      style={{ 
-                          background: isImportingMaster ? '#94a3b8' : 'var(--accent-primary)',
-                          padding: '0.75rem 1.25rem',
-                          fontSize: '0.9rem',
-                          borderRadius: '0.8rem',
-                          cursor: isImportingMaster ? 'not-allowed' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.5rem',
-                          boxShadow: '0 4px 6px -1px rgba(16, 185, 129, 0.2)',
-                          color: 'white',
-                          border: 'none'
-                      }}
-                      onClick={() => masterImportRef.current?.click()}
-                      disabled={isImportingMaster}
-                    >
-                        {isImportingMaster ? <Loader size={18} className="animate-spin" /> : <FileUp size={18} />}
-                        {isImportingMaster ? t('btnUpdating') : t('btnImportMaster')}
-                    </button>
-                    <input type="file" ref={masterImportRef} hidden accept=".xlsx,.xls,.csv" onChange={handleMasterImportExcel} />
-
-                    <button className="secondary-button" onClick={exportMasterExcel} disabled={isExportingMaster} style={{
-                        padding: '0.75rem 1.25rem',
-                        fontSize: '0.9rem',
-                        borderRadius: '0.8rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        border: '1px solid #e2e8f0',
-                        background: 'white'
-                    }}>
-                         <Download size={18} />
-                         {isExportingMaster ? t('btnExporting') : t('btnExportMaster')}
-                    </button>
-                </div>
-              </div>
-
-              <div className="master-table-container" style={{ 
-                  flex: 1,
-                  overflowY: 'auto', 
-                  border: '1px solid #f1f5f9', 
-                  borderRadius: '1rem',
-                  background: 'white',
-                  boxShadow: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.02)'
-              }}>
-                <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left' }}>
-                  <thead style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 10 }}>
-                    <tr>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>SKU</th>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Barcode / ID</th>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>{t('productNameLabel') || 'Sản phẩm'}</th>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Div</th>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Div Name</th>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Dept</th>
-                      <th style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600, color: '#64748b', borderBottom: '1px solid #f1f5f9' }}>Dept Name</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const filtered = filteredMasterProducts;
-                      const displayRows = filtered.slice((masterPage - 1) * ITEMS_PER_MASTER_PAGE, masterPage * ITEMS_PER_MASTER_PAGE);
-                      
-                      return (
-                        <>
-                          {displayRows.map((p, idx) => (
-                            <tr key={`${p.sku}-${idx}`} className="master-row" style={{ 
-                                transition: 'background 0.2s',
-                                cursor: 'default'
-                            }}>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', borderBottom: '1px solid #f8fafc', fontWeight: 500, color: '#334155' }}>
-                                <code style={{ background: '#f1f5f9', padding: '0.2rem 0.4rem', borderRadius: '0.4rem', fontSize: '0.8rem', color: 'var(--accent-primary)' }}>{p.sku}</code>
-                              </td>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>{p.barcode}</td>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.9rem', borderBottom: '1px solid #f8fafc', fontWeight: 500 }}>
-                                {p.name}
-                              </td>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.division || '-'}
-                              </td>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.divisionName || '-'}
-                              </td>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.department || '-'}
-                              </td>
-                              <td style={{ padding: '0.85rem 1rem', fontSize: '0.85rem', borderBottom: '1px solid #f8fafc', color: '#64748b' }}>
-                                {p.departmentName || '-'}
-                              </td>
-                            </tr>
-                          ))}
-                          {filtered.length === 0 && (
-                            <tr>
-                              <td colSpan="7" style={{ padding: '4rem', textAlign: 'center' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', color: '#94a3b8' }}>
-                                    <Search size={48} opacity={0.2} />
-                                    <p>Không tìm thấy sản phẩm nào phù hợp.</p>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-              
-              <footer className="master-footer" style={{ 
-                  display: 'flex', 
-                  flexWrap: 'wrap',
-                  justifyContent: 'space-between', 
-                  alignItems: 'center', 
-                  padding: '1rem 0.5rem',
-                  gap: '1rem',
-                  borderTop: '1px solid #f1f5f9'
-              }}>
-                  <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
-                    Tổng cộng: <strong>{masterProducts.length}</strong> | Tìm thấy: <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>{filteredMasterProducts.length}</span>
-                  </div>
-                  
-                  <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
-                    <button 
-                      className="pagination-btn" 
-                      disabled={masterPage <= 1}
-                      onClick={() => setMasterPage(p => p - 1)}
-                      style={{
-                          padding: '0.5rem 1rem',
-                          borderRadius: '0.6rem',
-                          border: '1px solid #e2e8f0',
-                          background: masterPage <= 1 ? '#f8fafc' : 'white',
-                          cursor: masterPage <= 1 ? 'not-allowed' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          fontSize: '0.9rem',
-                          color: masterPage <= 1 ? '#cbd5e1' : '#475569'
-                      }}
-                    >
-                      <ChevronLeft size={16} /> Trước
-                    </button>
-                    
-                    <span style={{ fontSize: '0.9rem', color: '#334155', fontWeight: 500 }}>
-                      Trang <span style={{ color: 'var(--accent-primary)' }}>{masterPage}</span> / {Math.max(1, Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE))}
-                    </span>
-                    
-                    <button 
-                      className="pagination-btn" 
-                      disabled={masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE)}
-                      onClick={() => setMasterPage(p => p + 1)}
-                      style={{
-                          padding: '0.5rem 1rem',
-                          borderRadius: '0.6rem',
-                          border: '1px solid #e2e8f0',
-                          background: masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE) ? '#f8fafc' : 'white',
-                          cursor: masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE) ? 'not-allowed' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          fontSize: '0.9rem',
-                          color: masterPage >= Math.ceil(filteredMasterProducts.length / ITEMS_PER_MASTER_PAGE) ? '#cbd5e1' : '#475569'
-                      }}
-                    >
-                      Tiếp <ChevronRight size={16} />
-                    </button>
-                  </div>
-              </footer>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {isCompactView && (
         <nav className="mobile-navigation">
@@ -5263,6 +5682,16 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={activeModule === 'stock' ? 'is-active' : ''}
+            onClick={() => setActiveModule('stock')}
+          >
+            <div className="icon-wrapper">
+              <CheckCircle2 size={22} strokeWidth={activeModule === 'stock' ? 2.8 : 2} />
+            </div>
+            <span>{t('moduleStock')}</span>
+          </button>
+          <button
+            type="button"
             className={activeModule === 'loss' ? 'is-active' : ''}
             onClick={() => setActiveModule('loss')}
           >
@@ -5273,17 +5702,37 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={activeModule === 'stock' ? 'is-active' : ''}
-            onClick={() => setActiveModule('stock')}
+            className={activeModule === 'master' ? 'is-active' : ''}
+            onClick={() => setActiveModule('master')}
           >
             <div className="icon-wrapper">
-              <CheckCircle2 size={22} strokeWidth={activeModule === 'stock' ? 2.8 : 2} />
+              <TableProperties size={22} strokeWidth={activeModule === 'master' ? 2.8 : 2} />
             </div>
-            <span>{t('moduleStock')}</span>
+            <span>Master</span>
           </button>
         </nav>
       )}
 
+      {/* Import Loading Overlay */}
+      {isImportingMaster && (
+        <div className="modal-backdrop" style={{ zIndex: 30000, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(12px)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.8rem', color: 'white', textAlign: 'center', padding: '2rem' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyItems: 'center' }}>
+              <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: '4px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--accent-primary)', animation: 'spin 1s linear infinite' }}></div>
+              <Database size={32} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: 'var(--accent-primary)' }} />
+            </div>
+            <div style={{ animation: 'fadeIn 0.5s ease-out' }}>
+              <h2 style={{ fontSize: '1.6rem', fontWeight: 800, marginBottom: '0.6rem', letterSpacing: '-0.02em' }}>Đang xử lý Master Data</h2>
+              <p style={{ opacity: 0.85, fontSize: '1.05rem', maxWidth: '300px', margin: '0 auto', lineHeight: '1.5' }}>
+                Vui lòng đợi trong giây lát. Hệ thống đang đồng bộ dữ liệu...
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Hidden Inputs */}
+      <input type="file" ref={masterImportRef} hidden accept=".xlsx,.xls,.csv" onChange={handleMasterImportExcel} />
     </div>
   );
 }

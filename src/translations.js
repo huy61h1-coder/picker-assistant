@@ -263,9 +263,14 @@ export const translations = {
     errEmptyLossAudit: 'Kỳ kiểm loss đang rỗng. Hãy quét barcode trước khi lưu.',
     errNoDataToExport: 'Không có dữ liệu để xuất Excel.',
     errExportExcelFailed: 'Không thể xuất file Excel.',
+    errNeedInputBeforeScan: 'Vui lòng nhập mã hoặc quét barcode trước.',
+    errNotFoundProductCode: (code) => `Không tìm thấy sản phẩm với mã: ${code}`,
     msgSaveLossComplete: (period, items, loss) => `Đã lưu kỳ ${period}: ${items} SKU, tổng hao hụt ${loss}.`,
-    msgScanned: (label, name) => `Đã ${label} ${name} thành công.`,
+    msgScanned: (label, name) => `Đã ${label === 'quet' ? 'quét' : 'thêm'} sản phẩm ${name} thành công.`,
     successExportExcel: (file) => `Đã xuất file ${file}.`,
+    quet: 'quét',
+    scan: 'quét',
+    them: 'thêm',
   },
 
   en: {
@@ -529,9 +534,14 @@ export const translations = {
     errEmptyLossAudit: 'Loss sheet is empty. Please scan barcodes before saving.',
     errNoDataToExport: 'No data to export.',
     errExportExcelFailed: 'Could not export Excel file.',
+    errNeedInputBeforeScan: 'Please enter a code or scan a barcode first.',
+    errNotFoundProductCode: (code) => `Product not found with code: ${code}`,
     msgSaveLossComplete: (period, items, loss) => `Saved ${period}: ${items} SKU, total loss ${loss}.`,
-    msgScanned: (label, name) => `Successfully ${label} ${name}.`,
+    msgScanned: (label, name) => `Successfully ${label === 'quet' ? 'scanned' : 'added'} product ${name}.`,
     successExportExcel: (file) => `Exported ${file}.`,
+    quet: 'scan',
+    scan: 'scan',
+    them: 'add',
   },
 };
 
