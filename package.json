@@ -9,7 +9,8 @@
     "dev:client": "vite",
     "dev:api": "node server/api-server.mjs",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@zxing/browser": "^0.1.5",
@@ -23,7 +24,9 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.32.3",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "wrangler": "^4.83.0"
   }
 }

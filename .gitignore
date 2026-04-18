@@ -15,3 +15,9 @@ matched_lines*.txt
 downloaded_bundle.js
 shared-data/
 !shared-data/.gitkeep
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
