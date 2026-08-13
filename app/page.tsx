@@ -1,11 +1,12 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { ParsedPlanogram } from "../lib/pdf-parser";
 
 const RAW = "https://raw.githubusercontent.com/huy61h1-coder/picker-assistant/main";
 
 type Product = {
+  planogramId?: string;
   sku: string;
   name: string;
   aisle: string;
@@ -165,6 +166,9 @@ export default function Home() {
   const [uploadDraft, setUploadDraft] = useState<ParsedPlanogram | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [draftMarkerIndex, setDraftMarkerIndex] = useState<number | null>(null);
+  const [markerEditMode, setMarkerEditMode] = useState(false);
+  const [markerNotice, setMarkerNotice] = useState("");
 
   const refreshImported = useCallback(async () => {
     try {
@@ -218,11 +222,18 @@ export default function Home() {
       .catch(() => setVisual(null));
   }, [selected]);
 
+  useEffect(() => {
+    setMarkerEditMode(false);
+    setMarkerNotice("");
+  }, [selected.aisle, selected.locId, selected.sku]);
+
   const line = aisleNumber(selected.aisle);
   const side = aisleSide(selected.aisle);
   const locationIndex = Math.max(1, Number(selected.locId) || 1);
-  const markerLeft = selected.markerX != null ? Math.min(98, Math.max(2, selected.markerX * 100)) : Math.min(90, 4 + ((locationIndex - 1) % 10) * 9.5);
-  const markerTop = selected.markerY != null ? Math.min(95, Math.max(5, selected.markerY * 100)) : 14;
+  const hasMarker = selected.markerX != null && selected.markerY != null
+    && Number.isFinite(Number(selected.markerX)) && Number.isFinite(Number(selected.markerY));
+  const markerLeft = hasMarker ? Math.min(100, Math.max(0, Number(selected.markerX) * 100)) : 0;
+  const markerTop = hasMarker ? Math.min(100, Math.max(0, Number(selected.markerY) * 100)) : 0;
 
   function chooseProduct(product: Product) {
     setSelected(product);
@@ -240,6 +251,7 @@ export default function Home() {
     if (!file) return;
     setUploadFile(file);
     setUploadDraft(null);
+    setDraftMarkerIndex(null);
     setUploadError("");
     if (file.type !== "application/pdf") {
       setUploadError("Vui lòng chọn đúng file PDF.");
@@ -252,7 +264,9 @@ export default function Home() {
     setUploadBusy(true);
     try {
       const { extractPlanogramFromPdf } = await import("../lib/pdf-parser");
-      setUploadDraft(await extractPlanogramFromPdf(file));
+      const parsed = await extractPlanogramFromPdf(file);
+      setUploadDraft(parsed);
+      setDraftMarkerIndex(Math.max(0, parsed.products.findIndex((product) => product.markerX == null || product.markerY == null)));
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Không thể phân tích PDF này.");
     } finally {
@@ -265,6 +279,45 @@ export default function Home() {
       ...current,
       products: current.products.map((product, productIndex) => productIndex === index ? { ...product, [field]: field === "locId" ? Number(value) : value } : product),
     } : current);
+  }
+
+  function placeDraftMarker(event: MouseEvent<HTMLDivElement>) {
+    if (!uploadDraft || draftMarkerIndex == null) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const markerX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const markerY = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    setUploadDraft((current) => current ? {
+      ...current,
+      products: current.products.map((product, index) => index === draftMarkerIndex ? { ...product, markerX, markerY } : product),
+    } : current);
+    setDraftMarkerIndex(null);
+  }
+
+  async function placeSavedMarker(event: MouseEvent<HTMLDivElement>) {
+    if (!markerEditMode || !selected.planogramId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const markerX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const markerY = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    setMarkerEditMode(false);
+    try {
+      const response = await fetch(`/api/planograms/${selected.planogramId}/products/${encodeURIComponent(selected.sku)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ locId: selected.locId, markerX, markerY }),
+      });
+      const payload = await readApiResponse(response);
+      if (!response.ok) throw new Error(payload.error || "Không thể lưu điểm đánh dấu");
+      const updateMarker = (product: Product) => product.planogramId === selected.planogramId && product.sku === selected.sku && product.locId === selected.locId
+        ? { ...product, markerX, markerY }
+        : product;
+      setImportedProducts((current) => current.map(updateMarker));
+      setSelected((current) => updateMarker(current));
+      setMarkerNotice("Đã lưu điểm chính xác trên ảnh.");
+    } catch (error) {
+      setMarkerNotice(error instanceof Error ? error.message : "Không thể lưu điểm đánh dấu");
+    }
   }
 
   async function savePdfImport() {
@@ -313,6 +366,7 @@ export default function Home() {
       setUploadOpen(false);
       setUploadFile(null);
       setUploadDraft(null);
+      setDraftMarkerIndex(null);
     } catch (error) {
       await Promise.all(uploadedAssets.map((asset) => fetch(`/api/planograms/${uploadId}/${asset}`, { method: "DELETE" }).catch(() => undefined)));
       setUploadError(error instanceof Error ? error.message : "Không thể lưu dữ liệu PDF");
@@ -407,14 +461,16 @@ export default function Home() {
           </aside>
 
           <div className="planogram">
-            <div className="planogram-bar"><div><b>{selected.aisle}</b><span>Line layout · Trang {visual?.pageNumber ?? "—"}</span></div><span className="zoom-note">Vị trí {String(locationIndex).padStart(2, "0")}</span></div>
+            <div className="planogram-bar"><div><b>{selected.aisle}</b><span>Line layout · Trang {visual?.pageNumber ?? "—"}</span></div><div className="planogram-actions"><button className={`marker-edit ${markerEditMode ? "is-editing" : ""}`} disabled={!visual || !selected.planogramId} onClick={() => { setMarkerEditMode((current) => !current); setMarkerNotice(""); }}>{markerEditMode ? "Bấm vào ảnh để đặt điểm" : "Chỉnh vị trí trên ảnh"}</button><span className="zoom-note">Vị trí {String(locationIndex).padStart(2, "0")}</span></div></div>
             <div className="planogram-canvas">
-              {visual ? <img src={visual.src} alt={`Line layout ${selected.aisle}`} /> : <div className="layout-missing"><b>Chưa có layout cho {selected.aisle}</b><span>Cần tải file layout lên để đánh dấu chính xác vị trí trưng bày.</span></div>}
-              {visual && <>
-                <div className="shelf-zone" style={{ left: `${markerLeft}%`, top: `${markerTop}%` }} />
-                <div className="shelf-marker" style={{ left: `${markerLeft}%`, top: `${markerTop}%` }}><span>{String(locationIndex).padStart(2, "0")}</span><b>Sản phẩm ở đây</b></div>
-              </>}
+              {visual ? <div className={`planogram-image-stage ${markerEditMode ? "is-picking" : ""}`} onClick={placeSavedMarker} role={markerEditMode ? "button" : undefined} tabIndex={markerEditMode ? 0 : undefined} aria-label={markerEditMode ? `Bấm vào đúng vị trí của sản phẩm ${selected.name}` : undefined}>
+                <img src={visual.src} alt={`Line layout ${selected.aisle}`} />
+                {hasMarker && <><div className="shelf-zone" style={{ left: `${markerLeft}%`, top: `${markerTop}%` }} /><div className="shelf-marker" style={{ left: `${markerLeft}%`, top: `${markerTop}%` }}><span>{String(locationIndex).padStart(2, "0")}</span><b>Sản phẩm ở đây</b></div></>}
+                {markerEditMode && <div className="marker-pick-hint">Bấm đúng vị trí {String(locationIndex).padStart(2, "0")} trên hình</div>}
+              </div> : <div className="layout-missing"><b>Chưa có layout cho {selected.aisle}</b><span>Cần tải file layout lên để đánh dấu chính xác vị trí trưng bày.</span></div>}
             </div>
+            {visual && !hasMarker && <div className="marker-status">Chưa xác định được tọa độ trên ảnh. Chọn “Chỉnh vị trí trên ảnh”, sau đó bấm vào đúng vị trí sản phẩm.</div>}
+            {markerNotice && <div className="marker-status">{markerNotice}</div>}
             <div className="location-ruler">{Array.from({ length: 10 }, (_, index) => <span className={index + 1 === ((locationIndex - 1) % 10) + 1 ? "active" : ""} key={index}>{String(index + 1).padStart(2, "0")}</span>)}</div>
           </div>
         </div>
@@ -439,11 +495,11 @@ export default function Home() {
           {uploadDraft && <div className="import-review">
             <div className="import-preview">
               <div className="review-title"><div><b>Trang layout được nhận diện</b><span>Trang {uploadDraft.visual.pageNumber}/{uploadDraft.visual.pageCount}</span></div><span>{uploadDraft.visual.markers.length} số vị trí tìm thấy</span></div>
-              <div className="draft-visual"><img src={uploadDraft.visual.src} alt="Trang layout được trích từ PDF" />{uploadDraft.visual.markers.map((marker) => <i key={marker.locId} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}>{marker.locId}</i>)}</div>
+              <div className="draft-visual"><div className={`draft-image-stage ${draftMarkerIndex != null ? "is-picking" : ""}`} onClick={placeDraftMarker} role={draftMarkerIndex != null ? "button" : undefined} tabIndex={draftMarkerIndex != null ? 0 : undefined} aria-label={draftMarkerIndex != null ? `Bấm vào vị trí của ${uploadDraft.products[draftMarkerIndex]?.name}` : undefined}><img src={uploadDraft.visual.src} alt="Trang layout được trích từ PDF" />{uploadDraft.products.map((product, index) => product.markerX != null && product.markerY != null && <i className={draftMarkerIndex === index ? "is-active" : ""} key={`${product.sku}-${index}`} style={{ left: `${product.markerX * 100}%`, top: `${product.markerY * 100}%` }}>{product.locId}</i>)}{draftMarkerIndex != null && <span className="draft-pick-hint">Bấm vào đúng vị trí {String(uploadDraft.products[draftMarkerIndex]?.locId ?? "").padStart(2, "0")} trên ảnh</span>}</div></div>
             </div>
             <div className="product-review">
               <div className="review-title"><div><b>Danh sách đã liên kết</b><span>Có thể sửa trước khi lưu</span></div><strong>{uploadDraft.products.length} sản phẩm</strong></div>
-              <div className="review-table"><div className="review-row review-head"><span>Vị trí</span><span>SKU</span><span>Tên sản phẩm</span></div>{uploadDraft.products.map((product, index) => <div className={`review-row ${product.markerX == null ? "unmatched" : ""}`} key={`${product.sku}-${index}`}><input aria-label={`Vị trí sản phẩm ${index + 1}`} type="number" min="1" value={product.locId} onChange={(event) => updateDraftProduct(index, "locId", event.target.value)} /><input aria-label={`SKU sản phẩm ${index + 1}`} value={product.sku} onChange={(event) => updateDraftProduct(index, "sku", event.target.value)} /><input aria-label={`Tên sản phẩm ${index + 1}`} value={product.name} onChange={(event) => updateDraftProduct(index, "name", event.target.value)} /></div>)}</div>
+              <div className="review-table"><div className="review-row review-head"><span>Vị trí</span><span>SKU</span><span>Tên sản phẩm</span><span>Điểm ảnh</span></div>{uploadDraft.products.map((product, index) => <div className={`review-row ${product.markerX == null || product.markerY == null ? "unmatched" : ""} ${draftMarkerIndex === index ? "is-editing" : ""}`} key={`${product.sku}-${index}`}><input aria-label={`Vị trí sản phẩm ${index + 1}`} type="number" min="1" value={product.locId} onChange={(event) => updateDraftProduct(index, "locId", event.target.value)} /><input aria-label={`SKU sản phẩm ${index + 1}`} value={product.sku} onChange={(event) => updateDraftProduct(index, "sku", event.target.value)} /><input aria-label={`Tên sản phẩm ${index + 1}`} value={product.name} onChange={(event) => updateDraftProduct(index, "name", event.target.value)} /><button type="button" className="set-marker" onClick={() => setDraftMarkerIndex(index)}>{product.markerX != null && product.markerY != null ? "Chỉnh" : "Đặt điểm"}</button></div>)}</div>
             </div>
           </div>}
 
