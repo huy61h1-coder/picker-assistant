@@ -47,11 +47,86 @@ function aisleSide(aisle: string) {
   return aisle.split("-")[1] ?? "A";
 }
 
-function lineBox(line: number) {
-  if (line >= 1 && line <= 8) return { left: 88.6 - (line - 1) * 5.18, top: 45.1, width: 4.75, height: 28.7 };
-  if (line >= 9 && line <= 16) return { left: 41.9 - (line - 9) * 5.03, top: 45.1, width: 4.72, height: 28.7 };
-  if (line >= 17 && line <= 21) return { left: 21.8 + (line - 17) * 5.15, top: 13.8, width: 4.72, height: 28.7 };
-  return { left: 53.1 + (line - 22) * 5.18, top: 13.8, width: 4.72, height: 28.7 };
+type LineSpec = { line: number; name: string; tone?: "yellow" | "pink"; logo?: boolean };
+
+const upperLeft: LineSpec[] = [
+  { line: 17, name: "BEER\nLIQUOR" },
+  { line: 18, name: "TEA\nBOTTLED\nDRINKS", tone: "yellow" },
+  { line: 19, name: "COFFEE", tone: "yellow" },
+  { line: 20, name: "TOPVALU", tone: "pink", logo: true },
+  { line: 21, name: "TOPVALU", tone: "pink", logo: true },
+];
+
+const upperRight: LineSpec[] = [
+  { line: 22, name: "ASIA" }, { line: 23, name: "ASIA" }, { line: 24, name: "NOODLES" },
+  { line: 25, name: "RICE,\nFLOUR" }, { line: 26, name: "SAUCES" }, { line: 27, name: "SPICES" },
+  { line: 28, name: "DRIED\nSEA\nFOOD\nEGG" },
+];
+
+const lowerLeft: LineSpec[] = [
+  { line: 16, name: "NON\nFOOD\n& HBC" }, { line: 15, name: "NON\nFOOD\n& HBC" },
+  { line: 14, name: "NON\nFOOD\n& HBC" }, { line: 13, name: "HOUSE\nWARE" },
+  { line: 12, name: "HOUSE\nWARE" }, { line: 11, name: "HOMECOORDY", logo: true },
+  { line: 10, name: "HOMECOORDY", logo: true }, { line: 9, name: "NON\nFOOD\n& HBC" },
+];
+
+const lowerRight: LineSpec[] = [
+  { line: 8, name: "KID" }, { line: 7, name: "KID" }, { line: 6, name: "MILK" }, { line: 5, name: "MILK" },
+  { line: 4, name: "CONFEC-\nTIONERY", tone: "pink" }, { line: 3, name: "DRIED\nFRUIT\nNUTS", tone: "pink" },
+  { line: 2, name: "CHOCO-\nLATE", tone: "pink" }, { line: 1, name: "PÍA\n-\nDRIED\nFRUIT\nNUTS", tone: "yellow" },
+];
+
+function StoreLayout({ activeLine }: { activeLine: number }) {
+  const bay = (spec: LineSpec, left: number, keyPrefix: string) => (
+    <div
+      key={`${keyPrefix}-${spec.line}`}
+      className={`map-line ${spec.tone ?? "grey"} ${activeLine === spec.line ? "is-active" : ""}`}
+      style={{ left: `${left}%` }}
+      aria-label={`Line ${spec.line}: ${spec.name.replaceAll("\n", " ")}`}
+    >
+      <div className="line-cap">LINE {String(spec.line).padStart(2, "0")}</div>
+      <div className="line-name">
+        {spec.logo ? <span className={`map-brand ${spec.name === "HOMECOORDY" ? "homecoordy" : "topvalu"}`}><b>TOPVALU</b>{spec.name === "HOMECOORDY" && <small>HOMECOORDY</small>}</span> : spec.name.split("\n").map((part, index) => <span key={index}>{part}</span>)}
+      </div>
+      <div className="line-cap">LINE {String(spec.line).padStart(2, "0")}</div>
+      {activeLine === spec.line && <div className="active-flag">SẢN PHẨM Ở LINE NÀY</div>}
+    </div>
+  );
+
+  return <div className="redrawn-map" role="img" aria-label="Sơ đồ các line hàng trong siêu thị được vẽ lại theo bản gốc">
+    <div className="map-zone top-zone daily-top">DAILY &amp; DAIRY</div>
+    <div className="map-zone top-zone meat-top">MEAT</div>
+    <div className="map-zone top-zone fish-top">FISH</div>
+
+    <div className="map-zone left-daily">DAILY<br />&amp;<br />DAIRY</div>
+    <div className="map-zone left-bottled">BOTTLED<br />DRINKS</div>
+    <div className="map-zone left-nonfood">NON<br />FOOD<br />&amp; HBC</div>
+
+    <div className="map-zone dairy-block">DAILY<br />&amp; DAIRY</div>
+    {upperLeft.map((spec, index) => bay(spec, 21.9 + index * 5.15, "upper-left"))}
+    <div className="map-zone promotion-vertical">PROMOTION</div>
+    {upperRight.map((spec, index) => bay(spec, 53.75 + index * 5.08, "upper-right"))}
+    <div className="map-zone daily-block">DAILY<br />&amp; DAIRY</div>
+
+    <div className="map-zone fish-side fish-one">FISH</div>
+    <div className="map-zone fish-side fish-two">FISH</div>
+    <div className="map-zone fish-side ready-cook">READY<br />TO<br />COOK</div>
+
+    <div className="lower-lines left-row">
+      {lowerLeft.map((spec, index) => bay(spec, 6.65 + index * 5.08, "lower-left"))}
+    </div>
+    <div className="lower-lines right-row">
+      {lowerRight.map((spec, index) => bay(spec, 53.75 + index * 5.02, "lower-right"))}
+    </div>
+
+    <div className="map-zone bottom-zone nonfood-bottom">NON-FOOD &amp; HBC</div>
+    <div className="map-zone bottom-zone cashier-bottom">CASHIER COUNTER</div>
+    <div className="map-zone bottom-zone promotion-bottom">PROMOTION</div>
+    <div className="map-zone bottom-zone tissue-bottom">TISSUE &amp; DIAPERS</div>
+    <div className="map-zone bottom-blank blank-one" />
+    <div className="map-zone bottom-blank blank-two" />
+    <div className="map-zone bottom-blank blank-three" />
+  </div>;
 }
 
 export default function Home() {
@@ -92,7 +167,6 @@ export default function Home() {
 
   const line = aisleNumber(selected.aisle);
   const side = aisleSide(selected.aisle);
-  const box = lineBox(line);
   const locationIndex = Math.max(1, Number(selected.locId) || 1);
   const markerLeft = Math.min(90, 4 + ((locationIndex - 1) % 10) * 9.5);
 
@@ -173,14 +247,7 @@ export default function Home() {
           <div><span className="step-number">01</span><div><p className="eyebrow">VỊ TRÍ TRONG SIÊU THỊ</p><h2>Đi đến Line {String(line).padStart(2, "0")}</h2></div></div>
           <p>Từ quầy thu ngân, đi về khu <b>NON FOOD &amp; HBC</b>. Line cần tìm đã được đánh dấu màu xanh.</p>
         </div>
-        <div className="store-map-wrap">
-          <img src="/store-map.png" alt="Sơ đồ tổng các line hàng trong siêu thị" />
-          <div className="line-highlight" style={{ left: `${box.left}%`, top: `${box.top}%`, width: `${box.width}%`, height: `${box.height}%` }}>
-            <span>LINE {String(line).padStart(2, "0")}</span>
-            <i />
-          </div>
-          <div className="you-are-here"><span>●</span> Bắt đầu từ quầy thu ngân</div>
-        </div>
+        <div className="store-map-wrap"><StoreLayout activeLine={line} /></div>
       </section>
 
       <section className="layout-section">
