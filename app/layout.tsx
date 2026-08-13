@@ -9,11 +9,11 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(`${protocol}://${host}`),
-    title: "Picker Assistant | Trung tâm điều hành",
-    description: "Giao diện quản lý dữ liệu Picker Assistant.",
+    title: "Picker Assistant | Tìm vị trí sản phẩm",
+    description: "Tìm line hàng và vị trí trưng bày chính xác trên line layout.",
     openGraph: {
-      title: "Picker Assistant | Trung tâm điều hành",
-      description: "Dữ liệu kho, sơ đồ quầy và tài khoản trong một màn hình.",
+      title: "Picker Assistant | Tìm đúng line, thấy đúng vị trí",
+      description: "Tìm sản phẩm, xem line trên sơ đồ siêu thị và vị trí trưng bày trên layout.",
       images: ["/og.png"],
     },
   };
