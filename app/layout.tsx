@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "Picker Assistant | Tìm đúng line, thấy đúng vị trí",
       description: "Tìm sản phẩm, xem line trên sơ đồ siêu thị và vị trí trưng bày trên layout.",
-      images: ["/og.png"],
+      images: ["/og-v2.png"],
     },
   };
 }

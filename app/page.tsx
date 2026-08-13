@@ -382,14 +382,14 @@ export default function Home() {
           <span className="brand-mark">P</span>
           <span><b>Picker</b><small>Assistant</small></span>
         </a>
-        <div className="header-actions"><div className="header-meta"><span className="online-dot" /> Dữ liệu cửa hàng đã kết nối</div><button className="upload-trigger" onClick={() => setUploadOpen(true)}>＋ Nhập PDF layout</button></div>
+        <div className="header-actions"><div className="header-meta"><span className="online-dot" /> Dữ liệu vị trí đã đồng bộ</div><button className="upload-trigger" onClick={() => setUploadOpen(true)}>＋ Nhập PDF layout</button></div>
       </header>
 
       <section className="search-hero" id="top">
         <div className="hero-copy">
           <p className="eyebrow">TÌM HÀNG TRONG SIÊU THỊ</p>
-          <h1>Tìm đúng line.<br /><em>Thấy đúng vị trí.</em></h1>
-          <p>Nhập tên sản phẩm, SKU hoặc quét mã để xem đường đi và vị trí trưng bày chính xác.</p>
+          <h1>Tìm sản phẩm.<br /><em>Hiện đúng vị trí.</em></h1>
+          <p>Nhập tên hoặc SKU. App sẽ chỉ ra line, mặt kệ và đúng điểm trưng bày trên layout.</p>
         </div>
 
         <div className="search-area">
@@ -421,33 +421,39 @@ export default function Home() {
             <span>Tìm nhanh:</span>
             {sourceProducts.map((product) => <button key={product.sku} onClick={() => chooseProduct(product)}>{product.name.includes("GỐI") ? "Gối Mochi" : "Tấm trải Icecold"}</button>)}
           </div>
+          <div className="search-helper" aria-label="Cách sử dụng">
+            <span><b>1</b>Tìm tên hoặc SKU</span><span><b>2</b>Đi đến đúng line</span><span><b>3</b>Xem điểm trên layout</span>
+          </div>
         </div>
       </section>
 
       <section className="location-summary" aria-live="polite">
         <div className="selected-product">
           <div className="product-thumb">HC</div>
-          <div><p>SẢN PHẨM ĐANG TÌM</p><h2>{selected.name}</h2><span>SKU {selected.sku} · {selected.category}</span></div>
+          <div><p>KẾT QUẢ ĐỊNH VỊ SẢN PHẨM</p><h2>{selected.name}</h2><span>SKU {selected.sku} · {selected.category ?? "Dữ liệu đã đồng bộ"}</span></div>
         </div>
-        <div className="location-facts">
-          <div><small>LINE</small><strong>{String(line).padStart(2, "0")}</strong></div>
-          <div><small>MẶT KỆ</small><strong>{side}</strong></div>
-          <div className="position-fact"><small>VỊ TRÍ</small><strong>{String(locationIndex).padStart(2, "0")}</strong></div>
+        <div className="location-result">
+          <div className="location-facts">
+            <div><small>LINE</small><strong>{String(line).padStart(2, "0")}</strong></div>
+            <div><small>MẶT KỆ</small><strong>{side}</strong></div>
+            <div className="position-fact"><small>VỊ TRÍ</small><strong>{String(locationIndex).padStart(2, "0")}</strong></div>
+          </div>
+          <a className="view-layout-button" href="#line-layout">Xem điểm trên layout ↓</a>
         </div>
       </section>
 
       <section className="map-section">
         <div className="section-heading">
-          <div><span className="step-number">01</span><div><p className="eyebrow">VỊ TRÍ TRONG SIÊU THỊ</p><h2>Đi đến Line {String(line).padStart(2, "0")}</h2></div></div>
-          <p>Từ quầy thu ngân, đi về khu <b>NON FOOD &amp; HBC</b>. Line cần tìm đã được đánh dấu màu xanh.</p>
+          <div><span className="step-number">01</span><div><p className="eyebrow">BẢN ĐỒ SIÊU THỊ</p><h2>Đi đến Line {String(line).padStart(2, "0")}</h2></div></div>
+          <p>Line cần tìm đã được đánh dấu màu xanh trên sơ đồ theo đúng thứ tự khu hàng bạn cung cấp.</p>
         </div>
         <div className="store-map-wrap"><StoreLayout activeLine={line} /></div>
       </section>
 
-      <section className="layout-section">
+      <section className="layout-section" id="line-layout">
         <div className="section-heading">
           <div><span className="step-number">02</span><div><p className="eyebrow">VỊ TRÍ TRÊN LINE LAYOUT</p><h2>Tìm vị trí {String(locationIndex).padStart(2, "0")} · Mặt {side}</h2></div></div>
-          <p>Đối chiếu mã vị trí trên nhãn kệ. Khu vực màu xanh là điểm trưng bày của sản phẩm.</p>
+          <p>Vòng tròn xanh là vị trí trưng bày của sản phẩm đang tìm. Đối chiếu thêm SKU trên nhãn kệ.</p>
         </div>
         <div className="layout-workspace">
           <aside className="route-card">
@@ -461,7 +467,7 @@ export default function Home() {
           </aside>
 
           <div className="planogram">
-            <div className="planogram-bar"><div><b>{selected.aisle}</b><span>Line layout · Trang {visual?.pageNumber ?? "—"}</span></div><div className="planogram-actions"><button className={`marker-edit ${markerEditMode ? "is-editing" : ""}`} disabled={!visual || !selected.planogramId} onClick={() => { setMarkerEditMode((current) => !current); setMarkerNotice(""); }}>{markerEditMode ? "Bấm vào ảnh để đặt điểm" : "Chỉnh vị trí trên ảnh"}</button><span className="zoom-note">Vị trí {String(locationIndex).padStart(2, "0")}</span></div></div>
+            <div className="planogram-bar"><div><b>{selected.aisle}</b><span>Line layout · Trang {visual?.pageNumber ?? "—"}</span></div><div className="planogram-actions"><span className={`marker-state ${hasMarker ? "is-ready" : ""}`}>{hasMarker ? "● Đã xác định điểm" : "○ Chưa có điểm"}</span><button className={`marker-edit ${markerEditMode ? "is-editing" : ""}`} disabled={!visual || !selected.planogramId} onClick={() => { setMarkerEditMode((current) => !current); setMarkerNotice(""); }}>{markerEditMode ? "Bấm vào ảnh để đặt điểm" : "Chỉnh vị trí trên ảnh"}</button><span className="zoom-note">Vị trí {String(locationIndex).padStart(2, "0")}</span></div></div>
             <div className="planogram-canvas">
               {visual ? <div className={`planogram-image-stage ${markerEditMode ? "is-picking" : ""}`} onClick={placeSavedMarker} role={markerEditMode ? "button" : undefined} tabIndex={markerEditMode ? 0 : undefined} aria-label={markerEditMode ? `Bấm vào đúng vị trí của sản phẩm ${selected.name}` : undefined}>
                 <img src={visual.src} alt={`Line layout ${selected.aisle}`} />
