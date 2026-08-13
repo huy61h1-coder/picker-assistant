@@ -1,6 +1,10 @@
 import { getDocument, GlobalWorkerOptions, Util } from "pdfjs-dist/build/pdf.mjs";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 
-GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).toString();
+// Let Vite emit the worker as a public build asset. Constructing this URL with
+// import.meta.url can be evaluated by the server build and leak a file:// URL
+// into the browser after deployment.
+GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export type ParsedProduct = {
   locId: number;
