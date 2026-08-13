@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { ParsedPlanogram } from "../lib/pdf-parser";
 
 const RAW = "https://raw.githubusercontent.com/huy61h1-coder/picker-assistant/main";
 
@@ -11,6 +12,13 @@ type Product = {
   locId: number;
   verified?: boolean;
   category?: string;
+  markerX?: number | null;
+  markerY?: number | null;
+  visualUrl?: string;
+  visualWidth?: number;
+  visualHeight?: number;
+  pageNumber?: number;
+  pdfUrl?: string;
 };
 
 type Visual = { pageNumber: number; width: number; height: number; src: string };
@@ -135,18 +143,40 @@ export default function Home() {
   const [selected, setSelected] = useState<Product>(sourceProducts[0]);
   const [visual, setVisual] = useState<Visual | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [importedProducts, setImportedProducts] = useState<Product[]>([]);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadLine, setUploadLine] = useState("12");
+  const [uploadSide, setUploadSide] = useState("A");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadDraft, setUploadDraft] = useState<ParsedPlanogram | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  const refreshImported = useCallback(async () => {
+    try {
+      const response = await fetch("/api/planograms", { cache: "no-store" });
+      if (!response.ok) return [];
+      const payload = await response.json() as { products?: Product[] };
+      const next = payload.products ?? [];
+      setImportedProducts(next);
+      return next;
+    } catch {
+      return [];
+    }
+  }, []);
 
   useEffect(() => {
     fetch(`${RAW}/shared-data/store.json`).then((res) => res.json()).then(setStore).catch(() => setStore(null));
-  }, []);
+    refreshImported();
+  }, [refreshImported]);
 
   const products = useMemo(() => {
     const remote = Object.entries(store?.aisleProducts ?? {}).flatMap(([aisle, items]) =>
       (Array.isArray(items) ? items : []).map((item) => ({ ...item, aisle: item.aisle || aisle })),
     );
-    const merged = [...remote, ...sourceProducts];
+    const merged = [...importedProducts, ...remote, ...sourceProducts];
     return merged.filter((item, index) => merged.findIndex((other) => other.sku === item.sku && other.aisle === item.aisle) === index);
-  }, [store]);
+  }, [store, importedProducts]);
 
   const results = useMemo(() => {
     const needle = normalize(query.trim());
@@ -156,6 +186,15 @@ export default function Home() {
 
   useEffect(() => {
     setVisual(null);
+    if (selected.visualUrl) {
+      setVisual({
+        src: selected.visualUrl,
+        width: selected.visualWidth ?? 1,
+        height: selected.visualHeight ?? 1,
+        pageNumber: selected.pageNumber ?? 1,
+      });
+      return;
+    }
     fetch(`${RAW}/shared-data/visuals/${selected.aisle}.json`)
       .then((res) => {
         if (!res.ok) throw new Error("missing");
@@ -168,7 +207,8 @@ export default function Home() {
   const line = aisleNumber(selected.aisle);
   const side = aisleSide(selected.aisle);
   const locationIndex = Math.max(1, Number(selected.locId) || 1);
-  const markerLeft = Math.min(90, 4 + ((locationIndex - 1) % 10) * 9.5);
+  const markerLeft = selected.markerX != null ? Math.min(98, Math.max(2, selected.markerX * 100)) : Math.min(90, 4 + ((locationIndex - 1) % 10) * 9.5);
+  const markerTop = selected.markerY != null ? Math.min(95, Math.max(5, selected.markerY * 100)) : 14;
 
   function chooseProduct(product: Product) {
     setSelected(product);
@@ -181,6 +221,66 @@ export default function Home() {
     if (results[0]) chooseProduct(results[0]);
   }
 
+  async function handlePdf(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploadFile(file);
+    setUploadDraft(null);
+    setUploadError("");
+    if (file.type !== "application/pdf") {
+      setUploadError("Vui lòng chọn đúng file PDF.");
+      return;
+    }
+    setUploadBusy(true);
+    try {
+      const { extractPlanogramFromPdf } = await import("../lib/pdf-parser");
+      setUploadDraft(await extractPlanogramFromPdf(file));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Không thể phân tích PDF này.");
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
+  function updateDraftProduct(index: number, field: "locId" | "sku" | "name", value: string) {
+    setUploadDraft((current) => current ? {
+      ...current,
+      products: current.products.map((product, productIndex) => productIndex === index ? { ...product, [field]: field === "locId" ? Number(value) : value } : product),
+    } : current);
+  }
+
+  async function savePdfImport() {
+    if (!uploadFile || !uploadDraft) return;
+    setUploadBusy(true);
+    setUploadError("");
+    try {
+      const visualBlob = await fetch(uploadDraft.visual.src).then((response) => response.blob());
+      const form = new FormData();
+      form.append("pdf", uploadFile);
+      form.append("visual", new File([visualBlob], "layout.jpg", { type: "image/jpeg" }));
+      form.append("lineId", `L${uploadLine}`);
+      form.append("side", uploadSide);
+      form.append("products", JSON.stringify(uploadDraft.products));
+      form.append("width", String(uploadDraft.visual.width));
+      form.append("height", String(uploadDraft.visual.height));
+      form.append("pageNumber", String(uploadDraft.visual.pageNumber));
+      form.append("pageCount", String(uploadDraft.visual.pageCount));
+      const response = await fetch("/api/planograms", { method: "POST", body: form });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Không thể lưu dữ liệu PDF");
+      const next = await refreshImported();
+      const first = next.find((product) => product.aisle === `L${uploadLine}-${uploadSide}`);
+      if (first) chooseProduct(first);
+      setUploadOpen(false);
+      setUploadFile(null);
+      setUploadDraft(null);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Không thể lưu dữ liệu PDF");
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
   return (
     <main className="finder-shell">
       <header className="app-header">
@@ -188,7 +288,7 @@ export default function Home() {
           <span className="brand-mark">P</span>
           <span><b>Picker</b><small>Assistant</small></span>
         </a>
-        <div className="header-meta"><span className="online-dot" /> Dữ liệu cửa hàng đã kết nối</div>
+        <div className="header-actions"><div className="header-meta"><span className="online-dot" /> Dữ liệu cửa hàng đã kết nối</div><button className="upload-trigger" onClick={() => setUploadOpen(true)}>＋ Nhập PDF layout</button></div>
       </header>
 
       <section className="search-hero" id="top">
@@ -271,14 +371,45 @@ export default function Home() {
             <div className="planogram-canvas">
               {visual ? <img src={visual.src} alt={`Line layout ${selected.aisle}`} /> : <div className="layout-missing"><b>Chưa có layout cho {selected.aisle}</b><span>Cần tải file layout lên để đánh dấu chính xác vị trí trưng bày.</span></div>}
               {visual && <>
-                <div className="shelf-zone" style={{ left: `${markerLeft}%` }} />
-                <div className="shelf-marker" style={{ left: `${markerLeft}%` }}><span>{String(locationIndex).padStart(2, "0")}</span><b>Sản phẩm ở đây</b></div>
+                <div className="shelf-zone" style={{ left: `${markerLeft}%`, top: `${markerTop}%` }} />
+                <div className="shelf-marker" style={{ left: `${markerLeft}%`, top: `${markerTop}%` }}><span>{String(locationIndex).padStart(2, "0")}</span><b>Sản phẩm ở đây</b></div>
               </>}
             </div>
             <div className="location-ruler">{Array.from({ length: 10 }, (_, index) => <span className={index + 1 === ((locationIndex - 1) % 10) + 1 ? "active" : ""} key={index}>{String(index + 1).padStart(2, "0")}</span>)}</div>
           </div>
         </div>
       </section>
+
+      {uploadOpen && <div className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
+        <button className="modal-backdrop" aria-label="Đóng" onClick={() => !uploadBusy && setUploadOpen(false)} />
+        <section className="upload-card">
+          <header><div><p className="eyebrow">NHẬP DỮ LIỆU PLANOGRAM</p><h2 id="upload-title">Liên kết sản phẩm từ PDF</h2><span>PDF được phân tích ngay trên trình duyệt; bản gốc và dữ liệu sau khi duyệt sẽ được lưu riêng tư.</span></div><button onClick={() => !uploadBusy && setUploadOpen(false)} aria-label="Đóng">×</button></header>
+
+          <div className="upload-steps"><span className="active">1. Chọn line &amp; PDF</span><span className={uploadDraft ? "active" : ""}>2. Kiểm tra liên kết</span><span>3. Lưu dữ liệu</span></div>
+
+          <div className="upload-controls">
+            <label>Line<select value={uploadLine} onChange={(event) => setUploadLine(event.target.value)}>{Array.from({ length: 28 }, (_, index) => index + 1).map((number) => <option key={number} value={number}>{`Line ${String(number).padStart(2, "0")}`}</option>)}</select></label>
+            <label>Mặt kệ<select value={uploadSide} onChange={(event) => setUploadSide(event.target.value)}><option value="A">Mặt A</option><option value="B">Mặt B</option></select></label>
+            <label className="pdf-drop"><input type="file" accept="application/pdf,.pdf" onChange={handlePdf} disabled={uploadBusy} /><span>▧</span><div><b>{uploadFile?.name || "Chọn file PDF planogram"}</b><small>Tối đa 50 MB · cần có lớp chữ để liên kết tự động</small></div></label>
+          </div>
+
+          {uploadBusy && <div className="parse-status"><i /> Đang đọc hình layout, số vị trí, SKU và tên sản phẩm…</div>}
+          {uploadError && <div className="upload-error"><b>Chưa thể xử lý PDF</b><span>{uploadError}</span></div>}
+
+          {uploadDraft && <div className="import-review">
+            <div className="import-preview">
+              <div className="review-title"><div><b>Trang layout được nhận diện</b><span>Trang {uploadDraft.visual.pageNumber}/{uploadDraft.visual.pageCount}</span></div><span>{uploadDraft.visual.markers.length} số vị trí tìm thấy</span></div>
+              <div className="draft-visual"><img src={uploadDraft.visual.src} alt="Trang layout được trích từ PDF" />{uploadDraft.visual.markers.map((marker) => <i key={marker.locId} style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}>{marker.locId}</i>)}</div>
+            </div>
+            <div className="product-review">
+              <div className="review-title"><div><b>Danh sách đã liên kết</b><span>Có thể sửa trước khi lưu</span></div><strong>{uploadDraft.products.length} sản phẩm</strong></div>
+              <div className="review-table"><div className="review-row review-head"><span>Vị trí</span><span>SKU</span><span>Tên sản phẩm</span></div>{uploadDraft.products.map((product, index) => <div className={`review-row ${product.markerX == null ? "unmatched" : ""}`} key={`${product.sku}-${index}`}><input aria-label={`Vị trí sản phẩm ${index + 1}`} type="number" min="1" value={product.locId} onChange={(event) => updateDraftProduct(index, "locId", event.target.value)} /><input aria-label={`SKU sản phẩm ${index + 1}`} value={product.sku} onChange={(event) => updateDraftProduct(index, "sku", event.target.value)} /><input aria-label={`Tên sản phẩm ${index + 1}`} value={product.name} onChange={(event) => updateDraftProduct(index, "name", event.target.value)} /></div>)}</div>
+            </div>
+          </div>}
+
+          <footer className="upload-footer"><span>{uploadDraft ? `Sẵn sàng lưu vào L${uploadLine}-${uploadSide}` : "Chọn PDF để bắt đầu"}</span><div><button className="cancel-button" onClick={() => !uploadBusy && setUploadOpen(false)}>Hủy</button><button className="save-import" disabled={!uploadDraft || uploadBusy} onClick={savePdfImport}>{uploadBusy ? "Đang xử lý…" : "Lưu & dùng để tìm kiếm"}</button></div></footer>
+        </section>
+      </div>}
 
       <footer><span>Picker Assistant · Store Navigation</span><span>{products.length} sản phẩm đã có dữ liệu vị trí</span></footer>
     </main>
