@@ -52,6 +52,10 @@ function cleanName(value: string) {
   return tidy(value.replace(/\b(?:EA|PCS|PC|UNIT|QTY|FACE|FACING|SHELF)\b/gi, ""));
 }
 
+function hasProductName(value: string) {
+  return /\p{L}/u.test(value);
+}
+
 function groupLines(items: any[]) {
   const sorted = items.filter((item) => tidy(item.str)).map((item) => ({ str: String(item.str), x: item.transform[4], y: item.transform[5], width: item.width || 0 })).sort((a, b) => b.y - a.y || a.x - b.x);
   const lines: Array<{ y: number; items: typeof sorted }> = [];
@@ -73,9 +77,18 @@ function groupLines(items: any[]) {
   }).filter(Boolean);
 }
 
+function adjacentLocation(tokens: string[], skuIndex: number) {
+  // In a planogram product-list row, the shelf position is the short number
+  // immediately before the product identifier / barcode. Never invent a
+  // sequential number: it would point the customer to a different product.
+  for (let index = skuIndex - 1; index >= Math.max(0, skuIndex - 5); index -= 1) {
+    if (isLocation(tokens[index]) && Number(tokens[index]) > 0) return Number(tokens[index]);
+  }
+  return null;
+}
+
 function parseProducts(lines: string[]): ParsedProduct[] {
   const records: ParsedProduct[] = [];
-  let fallbackLocation = 1;
 
   for (const line of lines) {
     if (!line || isHeader(line)) continue;
@@ -85,16 +98,12 @@ function parseProducts(lines: string[]): ParsedProduct[] {
 
     for (let position = 0; position < skuIndexes.length; position += 1) {
       const skuIndex = skuIndexes[position];
-      let locId: number | null = null;
-      for (let index = skuIndex - 1; index >= Math.max(0, skuIndex - 3); index -= 1) {
-        if (isLocation(tokens[index])) { locId = Number(tokens[index]); break; }
-      }
+      const locId = adjacentLocation(tokens, skuIndex);
       const nameEnd = position < skuIndexes.length - 1 ? skuIndexes[position + 1] : tokens.length;
       const name = cleanName(tokens.slice(skuIndex + 1, nameEnd).join(" ").replace(/^\d{1,4}\s+/, ""));
-      if (!name) continue;
-      const product = { locId: locId && locId > 0 ? locId : fallbackLocation, sku: tokens[skuIndex], name };
+      if (!name || !hasProductName(name) || !locId) continue;
+      const product = { locId, sku: tokens[skuIndex], name };
       records.push(product);
-      fallbackLocation = Math.max(fallbackLocation + 1, product.locId + 1);
     }
   }
 
@@ -102,8 +111,9 @@ function parseProducts(lines: string[]): ParsedProduct[] {
     for (const line of lines) {
       if (!line || isHeader(line)) continue;
       const match = line.match(/(?:^|\s)(\d{1,4})?\s*(\d{6,14})\s+(.+)$/);
-      if (!match) continue;
-      records.push({ locId: Number(match[1]) || fallbackLocation++, sku: match[2], name: cleanName(match[3]) });
+      const name = cleanName(match?.[3] ?? "");
+      if (!match || !Number(match[1]) || !hasProductName(name)) continue;
+      records.push({ locId: Number(match[1]), sku: match[2], name });
     }
   }
 
