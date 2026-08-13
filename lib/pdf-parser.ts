@@ -1,9 +1,16 @@
 import { getDocument, GlobalWorkerOptions, Util } from "pdfjs-dist/build/pdf.mjs";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 
-// Let Vite emit the worker as a public build asset. Constructing this URL with
-// import.meta.url can be evaluated by the server build and leak a file:// URL
-// into the browser after deployment.
+let pdfWorker: Worker | null = null;
+
+// Create the worker only when the user starts parsing a PDF. This keeps the
+// worker out of server rendering and prevents PDF.js from falling back to a
+// fake worker in the page context.
+function ensurePdfWorker() {
+  if (!pdfWorker) pdfWorker = new Worker(pdfWorkerUrl, { type: "module" });
+  GlobalWorkerOptions.workerPort = pdfWorker;
+}
+
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export type ParsedProduct = {
@@ -168,6 +175,7 @@ async function renderPage(pdf: any, pageNumber: number) {
 }
 
 export async function extractPlanogramFromPdf(file: File): Promise<ParsedPlanogram> {
+  ensurePdfWorker();
   const loading = getDocument({ data: await file.arrayBuffer() });
   const pdf = await loading.promise;
 

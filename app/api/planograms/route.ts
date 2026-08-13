@@ -8,6 +8,20 @@ type ImportedProduct = {
   markerY?: number | null;
 };
 
+type PlanogramImport = {
+  id?: string;
+  fileName?: string;
+  lineId?: string;
+  side?: string;
+  products?: ImportedProduct[];
+  width?: number;
+  height?: number;
+  pageNumber?: number;
+  pageCount?: number;
+};
+
+const validUploadId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 async function ensureSchema() {
   const db = env.DB;
   await db.batch([
@@ -98,27 +112,22 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const storedKeys: string[] = [];
-
   try {
     await ensureSchema();
-    const form = await request.formData();
-    const pdf = form.get("pdf");
-    const visual = form.get("visual");
-    const lineId = String(form.get("lineId") || "").toUpperCase().replace(/[^L0-9]/g, "");
-    const side = String(form.get("side") || "A").toUpperCase().replace(/[^AB]/g, "") || "A";
+    const payload = await request.json() as PlanogramImport;
+    const id = String(payload.id || "");
+    const fileName = String(payload.fileName || "planogram.pdf").replace(/[\r\n"]/g, "").slice(0, 240);
+    const lineId = String(payload.lineId || "").toUpperCase().replace(/[^L0-9]/g, "");
+    const side = String(payload.side || "A").toUpperCase().replace(/[^AB]/g, "") || "A";
     const aisleKey = `${lineId}-${side}`;
-    const products = JSON.parse(String(form.get("products") || "[]")) as ImportedProduct[];
-    const width = Math.max(1, Number(form.get("width")) || 1);
-    const height = Math.max(1, Number(form.get("height")) || 1);
-    const pageNumber = Math.max(1, Number(form.get("pageNumber")) || 1);
-    const pageCount = Math.max(1, Number(form.get("pageCount")) || 1);
+    const products = Array.isArray(payload.products) ? payload.products : [];
+    const width = Math.max(1, Number(payload.width) || 1);
+    const height = Math.max(1, Number(payload.height) || 1);
+    const pageNumber = Math.max(1, Number(payload.pageNumber) || 1);
+    const pageCount = Math.max(1, Number(payload.pageCount) || 1);
 
-    if (!(pdf instanceof File) || !(visual instanceof File)) {
-      return Response.json({ error: "Cần có file PDF và ảnh layout đã phân tích" }, { status: 400 });
-    }
-    if (pdf.type !== "application/pdf" || pdf.size > 50 * 1024 * 1024) {
-      return Response.json({ error: "Chỉ nhận PDF tối đa 50 MB" }, { status: 400 });
+    if (!validUploadId.test(id)) {
+      return Response.json({ error: "Mã phiên tải lên chưa hợp lệ" }, { status: 400 });
     }
     if (!/^L(?:[1-9]|1\d|2[0-8])$/.test(lineId)) {
       return Response.json({ error: "Line phải nằm trong khoảng L1-L28" }, { status: 400 });
@@ -127,16 +136,15 @@ export async function POST(request: Request) {
       return Response.json({ error: "Danh sách sản phẩm chưa hợp lệ" }, { status: 400 });
     }
 
-    const id = crypto.randomUUID();
     const pdfKey = `planograms/${id}/source.pdf`;
     const visualKey = `planograms/${id}/layout.jpg`;
     const now = new Date().toISOString();
     const old = await env.DB.prepare("SELECT id, pdf_key, visual_key FROM planograms WHERE aisle_key = ?").bind(aisleKey).first<Record<string, string>>();
+    const [storedPdf, storedVisual] = await Promise.all([env.FILES.head(pdfKey), env.FILES.head(visualKey)]);
 
-    await env.FILES.put(pdfKey, await pdf.arrayBuffer(), { httpMetadata: { contentType: "application/pdf" } });
-    storedKeys.push(pdfKey);
-    await env.FILES.put(visualKey, await visual.arrayBuffer(), { httpMetadata: { contentType: visual.type || "image/jpeg" } });
-    storedKeys.push(visualKey);
+    if (!storedPdf || !storedVisual) {
+      return Response.json({ error: "PDF hoặc ảnh layout chưa tải lên hoàn tất" }, { status: 400 });
+    }
 
     const statements = [];
     if (old?.id) {
@@ -146,7 +154,7 @@ export async function POST(request: Request) {
     statements.push(env.DB.prepare(`INSERT INTO planograms
       (id, aisle_key, line_id, side, file_name, pdf_key, visual_key, width, height, page_number, page_count, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, aisleKey, lineId, side, pdf.name, pdfKey, visualKey, width, height, pageNumber, pageCount, now));
+      .bind(id, aisleKey, lineId, side, fileName, pdfKey, visualKey, width, height, pageNumber, pageCount, now));
     await env.DB.batch(statements);
 
     const inserts = products.map((product) => env.DB.prepare(`INSERT INTO planogram_products
@@ -158,12 +166,13 @@ export async function POST(request: Request) {
     }
     await env.DB.prepare("PRAGMA optimize").run();
 
-    if (old?.pdf_key) await env.FILES.delete(old.pdf_key);
-    if (old?.visual_key) await env.FILES.delete(old.visual_key);
+    if (old?.id && old.id !== id) {
+      if (old.pdf_key) await env.FILES.delete(old.pdf_key);
+      if (old.visual_key) await env.FILES.delete(old.visual_key);
+    }
 
     return Response.json({ id, aisleKey, productCount: products.length }, { status: 201 });
   } catch (error) {
-    await Promise.all(storedKeys.map((key) => env.FILES.delete(key).catch(() => undefined)));
     return Response.json({ error: error instanceof Error ? error.message : "Không thể lưu PDF" }, { status: 500 });
   }
 }

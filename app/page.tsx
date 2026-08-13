@@ -47,6 +47,20 @@ function normalize(value: string) {
   return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+async function readApiResponse(response: Response): Promise<{ error?: string }> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as { error?: string };
+  } catch {
+    return {
+      error: response.status === 413
+        ? "File vượt giới hạn tải lên. Hãy chọn PDF không quá 50 MB."
+        : text.slice(0, 300),
+    };
+  }
+}
+
 function aisleNumber(aisle: string) {
   return Number(aisle.match(/\d+/)?.[0] ?? 12);
 }
@@ -231,6 +245,10 @@ export default function Home() {
       setUploadError("Vui lòng chọn đúng file PDF.");
       return;
     }
+    if (file.size > 50 * 1024 * 1024) {
+      setUploadError("File PDF vượt quá giới hạn 50 MB.");
+      return;
+    }
     setUploadBusy(true);
     try {
       const { extractPlanogramFromPdf } = await import("../lib/pdf-parser");
@@ -253,20 +271,41 @@ export default function Home() {
     if (!uploadFile || !uploadDraft) return;
     setUploadBusy(true);
     setUploadError("");
+    const uploadId = crypto.randomUUID();
+    const uploadedAssets: string[] = [];
     try {
       const visualBlob = await fetch(uploadDraft.visual.src).then((response) => response.blob());
-      const form = new FormData();
-      form.append("pdf", uploadFile);
-      form.append("visual", new File([visualBlob], "layout.jpg", { type: "image/jpeg" }));
-      form.append("lineId", `L${uploadLine}`);
-      form.append("side", uploadSide);
-      form.append("products", JSON.stringify(uploadDraft.products));
-      form.append("width", String(uploadDraft.visual.width));
-      form.append("height", String(uploadDraft.visual.height));
-      form.append("pageNumber", String(uploadDraft.visual.pageNumber));
-      form.append("pageCount", String(uploadDraft.visual.pageCount));
-      const response = await fetch("/api/planograms", { method: "POST", body: form });
-      const payload = await response.json() as { error?: string };
+
+      const uploadAsset = async (asset: "pdf" | "visual", body: Blob) => {
+        const response = await fetch(`/api/planograms/${uploadId}/${asset}`, {
+          method: "PUT",
+          headers: { "content-type": body.type },
+          body,
+        });
+        const payload = await readApiResponse(response);
+        if (!response.ok) throw new Error(payload.error || `Không thể tải ${asset === "pdf" ? "PDF" : "ảnh layout"} lên`);
+        uploadedAssets.push(asset);
+      };
+
+      await uploadAsset("pdf", uploadFile);
+      await uploadAsset("visual", visualBlob);
+
+      const response = await fetch("/api/planograms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: uploadId,
+          fileName: uploadFile.name,
+          lineId: `L${uploadLine}`,
+          side: uploadSide,
+          products: uploadDraft.products,
+          width: uploadDraft.visual.width,
+          height: uploadDraft.visual.height,
+          pageNumber: uploadDraft.visual.pageNumber,
+          pageCount: uploadDraft.visual.pageCount,
+        }),
+      });
+      const payload = await readApiResponse(response);
       if (!response.ok) throw new Error(payload.error || "Không thể lưu dữ liệu PDF");
       const next = await refreshImported();
       const first = next.find((product) => product.aisle === `L${uploadLine}-${uploadSide}`);
@@ -275,6 +314,7 @@ export default function Home() {
       setUploadFile(null);
       setUploadDraft(null);
     } catch (error) {
+      await Promise.all(uploadedAssets.map((asset) => fetch(`/api/planograms/${uploadId}/${asset}`, { method: "DELETE" }).catch(() => undefined)));
       setUploadError(error instanceof Error ? error.message : "Không thể lưu dữ liệu PDF");
     } finally {
       setUploadBusy(false);
