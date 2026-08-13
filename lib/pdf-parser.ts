@@ -1,5 +1,6 @@
 import { getDocument, GlobalWorkerOptions, Util } from "pdfjs-dist/build/pdf.mjs";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+
+const pdfWorkerUrl = "/pdf.worker.mjs?v=5.6.205";
 
 let pdfWorker: Worker | null = null;
 
