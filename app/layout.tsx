@@ -9,12 +9,12 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(`${protocol}://${host}`),
-    title: "Picker Assistant | Tìm vị trí sản phẩm",
-    description: "Tìm line hàng và vị trí trưng bày chính xác trên line layout.",
+    title: "AEON SmartOps | Tìm vị trí sản phẩm",
+    description: "Tìm line hàng, vị trí trưng bày, tồn kho và thông tin vận hành sản phẩm.",
     openGraph: {
-      title: "Picker Assistant | Tìm đúng line, thấy đúng vị trí",
-      description: "Tìm sản phẩm, xem line trên sơ đồ siêu thị và vị trí trưng bày trên layout.",
-      images: ["/og-v2.png"],
+      title: "AEON SmartOps | Tìm đúng line, thấy đúng vị trí",
+      description: "Tìm sản phẩm theo tên, SKU hoặc barcode và xem đúng vị trí trên line layout.",
+      images: ["/og-smartops.png"],
     },
   };
 }

@@ -20,6 +20,11 @@ type Product = {
   visualHeight?: number;
   pageNumber?: number;
   pdfUrl?: string;
+  barcode?: string;
+  price?: number;
+  stock?: number;
+  loss?: number;
+  expiry?: string;
 };
 
 type Visual = { pageNumber: number; width: number; height: number; src: string };
@@ -33,6 +38,10 @@ const sourceProducts: Product[] = [
     locId: 1,
     verified: true,
     category: "HomeCoordy · Bed / Clean",
+    price: 450000,
+    stock: 5,
+    loss: 0,
+    expiry: "2026-12-31",
   },
   {
     sku: "10763049",
@@ -41,6 +50,23 @@ const sourceProducts: Product[] = [
     locId: 5,
     verified: true,
     category: "HomeCoordy · Bed / Clean",
+    price: 185000,
+    stock: 45,
+    loss: 2,
+    expiry: "2026-06-15",
+  },
+  {
+    sku: "8969583",
+    barcode: "8801260418800",
+    name: "BVS SOONSOOHANMYEON 23CM 18 MIẾNG",
+    aisle: "L16-A",
+    locId: 18,
+    verified: true,
+    category: "Non-food & HBC · Feminine care",
+    price: 45000,
+    stock: 0,
+    loss: 0,
+    expiry: "2027-01-10",
   },
 ];
 
@@ -199,7 +225,7 @@ export default function Home() {
   const results = useMemo(() => {
     const needle = normalize(query.trim());
     if (!needle) return products.slice(0, 6);
-    return products.filter((product) => normalize(`${product.name} ${product.sku} ${product.aisle} ${product.category ?? ""}`).includes(needle)).slice(0, 8);
+    return products.filter((product) => normalize(`${product.name} ${product.sku} ${product.barcode ?? ""} ${product.aisle} ${product.category ?? ""}`).includes(needle)).slice(0, 8);
   }, [products, query]);
 
   useEffect(() => {
@@ -234,6 +260,9 @@ export default function Home() {
     && Number.isFinite(Number(selected.markerX)) && Number.isFinite(Number(selected.markerY));
   const markerLeft = hasMarker ? Math.min(100, Math.max(0, Number(selected.markerX) * 100)) : 0;
   const markerTop = hasMarker ? Math.min(100, Math.max(0, Number(selected.markerY) * 100)) : 0;
+  const outOfStock = products.filter((product) => product.stock === 0).length;
+  const lowStock = products.filter((product) => (product.stock ?? 999) > 0 && (product.stock ?? 999) <= 10).length;
+  const totalLoss = products.reduce((total, product) => total + (product.loss ?? 0), 0);
 
   function chooseProduct(product: Product) {
     setSelected(product);
@@ -380,16 +409,16 @@ export default function Home() {
       <header className="app-header">
         <a className="brand" href="#top" aria-label="Picker Assistant trang chủ">
           <span className="brand-mark">P</span>
-          <span><b>Picker</b><small>Assistant</small></span>
+          <span><b>AEON</b><small>SmartOps</small></span>
         </a>
         <div className="header-actions"><div className="header-meta"><span className="online-dot" /> Dữ liệu vị trí đã đồng bộ</div><button className="upload-trigger" onClick={() => setUploadOpen(true)}>＋ Nhập PDF layout</button></div>
       </header>
 
       <section className="search-hero" id="top">
         <div className="hero-copy">
-          <p className="eyebrow">TÌM HÀNG TRONG SIÊU THỊ</p>
-          <h1>Tìm sản phẩm.<br /><em>Hiện đúng vị trí.</em></h1>
-          <p>Nhập tên hoặc SKU. App sẽ chỉ ra line, mặt kệ và đúng điểm trưng bày trên layout.</p>
+          <p className="eyebrow">AEON SMARTOPS · PRODUCT FINDER</p>
+          <h1>Một lần tìm.<br /><em>Đủ thông tin để lấy hàng.</em></h1>
+          <p>Nhập tên, SKU hoặc barcode. App chỉ ra line, vị trí trưng bày, tồn kho và thông tin vận hành của sản phẩm.</p>
         </div>
 
         <div className="search-area">
@@ -442,10 +471,17 @@ export default function Home() {
         </div>
       </section>
 
+      <section className="operations-strip" aria-label="Tổng quan vận hành">
+        <div className="operation-intro"><p>TRUNG TÂM VẬN HÀNH</p><b>Dữ liệu sản phẩm &amp; vị trí</b><span>Dữ liệu mẫu từ danh sách bạn cung cấp và PDF đã nhập.</span></div>
+        <div className="operation-card"><span>SKU đã có vị trí</span><b>{products.length}</b><small>Search theo tên / SKU / barcode</small></div>
+        <div className="operation-card warning"><span>Cần bổ sung hàng</span><b>{outOfStock + lowStock}</b><small>{outOfStock} hết hàng · {lowStock} sắp hết</small></div>
+        <div className="operation-card"><span>Hao hụt ghi nhận</span><b>{totalLoss}</b><small>đơn vị trong dữ liệu hiện có</small></div>
+      </section>
+
       <section className="map-section">
         <div className="section-heading">
           <div><span className="step-number">01</span><div><p className="eyebrow">BẢN ĐỒ SIÊU THỊ</p><h2>Đi đến Line {String(line).padStart(2, "0")}</h2></div></div>
-          <p>Line cần tìm đã được đánh dấu màu xanh trên sơ đồ theo đúng thứ tự khu hàng bạn cung cấp.</p>
+          <p>Line cần tìm được đánh dấu trên sơ đồ, giữ đúng thứ tự, tên khu hàng, màu sắc và vị trí của layout gốc.</p>
         </div>
         <div className="store-map-wrap"><StoreLayout activeLine={line} /></div>
       </section>
@@ -453,7 +489,7 @@ export default function Home() {
       <section className="layout-section" id="line-layout">
         <div className="section-heading">
           <div><span className="step-number">02</span><div><p className="eyebrow">VỊ TRÍ TRÊN LINE LAYOUT</p><h2>Tìm vị trí {String(locationIndex).padStart(2, "0")} · Mặt {side}</h2></div></div>
-          <p>Vòng tròn xanh là vị trí trưng bày của sản phẩm đang tìm. Đối chiếu thêm SKU trên nhãn kệ.</p>
+          <p>Vòng tròn xanh là vị trí trưng bày. Số vị trí luôn liên kết với nhãn số liền kề sản phẩm trên PDF, không tự đánh số.</p>
         </div>
         <div className="layout-workspace">
           <aside className="route-card">
@@ -513,7 +549,7 @@ export default function Home() {
         </section>
       </div>}
 
-      <footer><span>Picker Assistant · Store Navigation</span><span>{products.length} sản phẩm đã có dữ liệu vị trí</span></footer>
+      <footer><span>AEON SmartOps · Product location &amp; operations</span><span>{products.length} sản phẩm đã có dữ liệu vị trí</span></footer>
     </main>
   );
 }
