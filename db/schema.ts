@@ -39,3 +39,24 @@ export const planogramProducts = sqliteTable(
     index("idx_planogram_products_aisle_loc").on(table.aisleKey, table.locId),
   ],
 );
+
+export const masterProducts = sqliteTable(
+  "master_products",
+  {
+    id: text("id").primaryKey(),
+    sku: text("sku").notNull(),
+    barcode: text("barcode").notNull().default(""),
+    name: text("name").notNull(),
+    line: text("line").notNull(),
+    locId: integer("loc_id"),
+    price: integer("price").notNull().default(0),
+    stock: integer("stock").notNull().default(0),
+    loss: integer("loss").notNull().default(0),
+    expDate: text("exp_date").notNull().default(""),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_master_products_sku").on(table.sku),
+    index("idx_master_products_line").on(table.line),
+  ],
+);

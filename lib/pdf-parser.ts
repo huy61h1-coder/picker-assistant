@@ -17,6 +17,7 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 export type ParsedProduct = {
   locId: number;
   sku: string;
+  barcode?: string;
   name: string;
   markerX?: number | null;
   markerY?: number | null;
@@ -45,7 +46,8 @@ function isHeader(line: string) {
   return headerWords.some((word) => lower.includes(word));
 }
 
-function isSku(value: string) { return /^\d{6,14}$/.test(value); }
+function isSku(value: string) { return /^\d{5,10}$/.test(value); }
+function isBarcode(value: string) { return /^\d{11,15}$/.test(value); }
 function isLocation(value: string) { return /^\d{1,4}$/.test(value); }
 
 function cleanName(value: string) {
@@ -93,27 +95,28 @@ function parseProducts(lines: string[]): ParsedProduct[] {
   for (const line of lines) {
     if (!line || isHeader(line)) continue;
     const tokens = line.split(" ");
-    const skuIndexes = tokens.map((token, index) => isSku(token) ? index : -1).filter((index) => index >= 0);
-    if (!skuIndexes.length) continue;
-
-    for (let position = 0; position < skuIndexes.length; position += 1) {
-      const skuIndex = skuIndexes[position];
-      const locId = adjacentLocation(tokens, skuIndex);
-      const nameEnd = position < skuIndexes.length - 1 ? skuIndexes[position + 1] : tokens.length;
-      const name = cleanName(tokens.slice(skuIndex + 1, nameEnd).join(" ").replace(/^\d{1,4}\s+/, ""));
-      if (!name || !hasProductName(name) || !locId) continue;
-      const product = { locId, sku: tokens[skuIndex], name };
-      records.push(product);
-    }
+    const skuIndex = tokens.findIndex(isSku);
+    const barcodeIndex = tokens.findIndex(isBarcode);
+    if (skuIndex < 0 && barcodeIndex < 0) continue;
+    const firstIdentifier = Math.min(skuIndex < 0 ? Number.MAX_SAFE_INTEGER : skuIndex, barcodeIndex < 0 ? Number.MAX_SAFE_INTEGER : barcodeIndex);
+    const lastIdentifier = Math.max(skuIndex, barcodeIndex);
+    const locId = adjacentLocation(tokens, firstIdentifier);
+    const nameTokens = tokens.slice(lastIdentifier + 1);
+    while (nameTokens.length && /^\d+(?:\.\d+)?$/.test(nameTokens.at(-1) || "")) nameTokens.pop();
+    const name = cleanName(nameTokens.join(" "));
+    const sku = skuIndex >= 0 ? tokens[skuIndex] : tokens[barcodeIndex];
+    const barcode = barcodeIndex >= 0 ? tokens[barcodeIndex] : "";
+    if (!name || !hasProductName(name) || !locId || !sku) continue;
+    records.push({ locId, sku, barcode, name });
   }
 
   if (!records.length) {
     for (const line of lines) {
       if (!line || isHeader(line)) continue;
-      const match = line.match(/(?:^|\s)(\d{1,4})?\s*(\d{6,14})\s+(.+)$/);
-      const name = cleanName(match?.[3] ?? "");
+      const match = line.match(/(?:^|\s)(\d{1,4})\s+(\d{5,10})(?:\s+(\d{11,15}))?\s+(.+)$/);
+      const name = cleanName(match?.[4] ?? "");
       if (!match || !Number(match[1]) || !hasProductName(name)) continue;
-      records.push({ locId: Number(match[1]), sku: match[2], name });
+      records.push({ locId: Number(match[1]), sku: match[2], barcode: match[3] || "", name });
     }
   }
 

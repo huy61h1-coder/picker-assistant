@@ -8,6 +8,13 @@
       "when": 1786625251791,
       "tag": "0000_narrow_overlord",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787566800000,
+      "tag": "0001_master_products",
+      "breakpoints": true
     }
   ]
 }
